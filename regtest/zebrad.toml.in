@@ -1,0 +1,32 @@
+# Zebra config for Tacit's local regtest chain.
+#
+# `tacit-dev init` fills in MINER_ADDRESS with the dev faucet wallet's unified
+# address and writes the result to regtest/zebrad.toml. Every network upgrade,
+# including NU6.3 (Ironwood), activates at height 1, and a coinbase paid to a
+# unified address with an Orchard receiver lands in the Ironwood pool.
+#
+# The heights are spelled out because Zebra 6.4.2's regtest only activates
+# up to Canopy by default.
+
+[network]
+network = "Regtest"
+
+[network.testnet_parameters.activation_heights]
+NU5 = 1
+NU6 = 1
+"NU6.1" = 1
+"NU6.2" = 1
+"NU6.3" = 1
+
+[mining]
+miner_address = "MINER_ADDRESS"
+
+[rpc]
+listen_addr = "0.0.0.0:18232"
+# The lightwalletd-compatible gRPC server wallets sync from.
+lightwalletd_listen_addr = "0.0.0.0:9067"
+# Local-only dev chain; nothing else listens on these ports.
+enable_cookie_auth = false
+
+[state]
+cache_dir = "STATE_DIR"

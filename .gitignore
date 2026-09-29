@@ -3,3 +3,6 @@ node_modules
 dist
 *.sqlite
 .env
+regtest/faucet.seed
+regtest/zebrad.toml
+regtest/e2e/

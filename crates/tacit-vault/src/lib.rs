@@ -12,7 +12,7 @@
 
 use std::collections::BTreeMap;
 
-use orchard::keys::{FullViewingKey, Scope, SpendValidatingKey, SpendingKey};
+use orchard::keys::{FullViewingKey, SpendValidatingKey, SpendingKey};
 use orchard::primitives::redpallas::{self, SpendAuth};
 use pczt::roles::low_level_signer;
 use pczt::roles::signer::Signer;
@@ -20,7 +20,7 @@ use pasta_curves::group::ff::PrimeField;
 use pczt::Pczt;
 use rand_core::{CryptoRng, RngCore};
 use zcash_keys::address::UnifiedAddress;
-use zcash_keys::keys::UnifiedFullViewingKey;
+use zcash_keys::keys::{UnifiedAddressRequest, UnifiedFullViewingKey};
 use zcash_protocol::consensus::Parameters;
 
 pub use reddsa::frost::redpallas as frost;
@@ -114,9 +114,9 @@ impl Vault {
     /// Diversified receiving address `j`. Distinct indices give addresses that
     /// can't be linked to each other without the viewing key.
     pub fn address(&self, j: u32) -> UnifiedAddress {
-        let addr = self.fvk.address_at(j, Scope::External);
-        UnifiedAddress::from_receivers(Some(addr), None)
-            .expect("a single shielded receiver is a valid UA")
+        self.ufvk()
+            .address(j.into(), UnifiedAddressRequest::ORCHARD)
+            .expect("every Orchard diversifier index yields a valid address")
     }
 
     pub fn encode_address(&self, params: &impl Parameters, j: u32) -> String {
