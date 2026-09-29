@@ -1,0 +1,18 @@
+[workspace]
+resolver = "2"
+members = ["crates/*", "spikes/*"]
+
+[workspace.package]
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/uzoechiraphael1/tacit"
+
+# Pairings and proofs are painfully slow unoptimised; build deps with -O3 even in dev.
+[profile.dev.package."*"]
+opt-level = 3
+
+# FROST spend authorization needs FullViewingKey::from_sk_ak, which is only on
+# this branch until zcash/orchard#475 is merged. Same rev ZF used for their
+# Ironwood FROST testnet transaction.
+[patch.crates-io]
+orchard = { git = "https://github.com/conradoplg/orchard.git", rev = "42015f15733b95e179189628d6fa34d92b5b3b8b" }
