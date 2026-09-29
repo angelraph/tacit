@@ -16,3 +16,7 @@ opt-level = 3
 # Ironwood FROST testnet transaction.
 [patch.crates-io]
 orchard = { git = "https://github.com/conradoplg/orchard.git", rev = "42015f15733b95e179189628d6fa34d92b5b3b8b" }
+
+# Our own curve code (tlock IBE) is too slow unoptimised for the tests.
+[profile.dev.package.tacit-core]
+opt-level = 3

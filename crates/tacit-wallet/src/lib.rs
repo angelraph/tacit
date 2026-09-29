@@ -24,8 +24,12 @@ use secrecy::SecretVec;
 use tonic::transport::Channel;
 use zcash_client_backend::data_api::wallet::{
     create_pczt_from_proposal, extract_and_store_transaction_from_pczt,
-    propose_standard_transfer_to_address, ConfirmationsPolicy,
+    input_selection::{GreedyInputSelector, SpendPolicy},
+    propose_transfer, ConfirmationsPolicy,
 };
+use zcash_client_backend::fees::zip317::SingleOutputChangeStrategy;
+use zcash_client_backend::fees::DustOutputPolicy;
+use zip321::{Payment, TransactionRequest};
 use zcash_client_backend::data_api::{
     Account as _, AccountBirthday, AccountPurpose, WalletRead, WalletWrite,
 };
@@ -37,7 +41,7 @@ use zcash_client_sqlite::util::SystemClock;
 use zcash_client_sqlite::wallet::init::init_wallet_db;
 use zcash_client_sqlite::{AccountUuid, WalletDb};
 use zcash_keys::address::Address;
-use zcash_keys::keys::{UnifiedAddressRequest, UnifiedSpendingKey};
+use zcash_keys::keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey};
 use zcash_primitives::transaction::builder::BundlePadding;
 use zcash_primitives::transaction::TxId;
 use zcash_protocol::consensus::{BlockHeight, Parameters};
@@ -50,10 +54,42 @@ use tacit_vault::frost::keys::KeyPackage;
 use tacit_vault::frost::Identifier;
 use tacit_vault::Vault;
 
+pub mod auction;
 pub mod cache;
+pub mod drand;
 use cache::MemBlockCache;
 
 pub type Db<P> = WalletDb<rusqlite::Connection, P, SystemClock, OsRng>;
+pub type GrpcClient = CompactTxStreamerClient<Channel>;
+
+/// A note an account received.
+#[derive(Clone, Debug)]
+pub struct Received {
+    /// txid followed by the action index (little endian u32); unique and public.
+    pub id: Vec<u8>,
+    pub txid: TxId,
+    pub value: u64,
+    pub mined_height: u32,
+    pub memo: Vec<u8>,
+}
+
+/// The raw 43 byte Orchard-protocol receiver inside a unified address, which
+/// is what sealed bids carry for refunds.
+pub fn raw_receiver(params: &impl Parameters, address: &str) -> Option<[u8; 43]> {
+    match Address::decode(params, address)? {
+        Address::Unified(ua) => ua.orchard().map(|o| o.to_raw_address_bytes()),
+        _ => None,
+    }
+}
+
+/// Encodes a raw receiver as a unified address on `params`' network.
+pub fn address_from_raw(params: &impl Parameters, raw: &[u8; 43]) -> String {
+    use zcash_address::unified::{self, Encoding};
+    use zcash_address::ToAddress;
+    let ua = unified::Address::try_from_items(vec![unified::Receiver::Orchard(*raw)])
+        .expect("a single Orchard receiver is a valid unified address");
+    zcash_address::ZcashAddress::from_unified(params.network_type(), ua).encode()
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum WalletError {
@@ -109,15 +145,17 @@ pub fn ironwood_proving_key() -> ProvingKey {
 
 pub struct Wallet<P: Parameters + Clone + Send + 'static> {
     db: Db<P>,
+    path: std::path::PathBuf,
     params: P,
     cache: MemBlockCache,
 }
 
 impl<P: Parameters + Clone + Send + Sync + 'static> Wallet<P> {
     pub fn open(path: impl AsRef<Path>, params: P) -> Result<Self, WalletError> {
-        let mut db = WalletDb::for_path(path, params.clone(), SystemClock, OsRng).map_err(db_err)?;
+        let path = path.as_ref().to_path_buf();
+        let mut db = WalletDb::for_path(&path, params.clone(), SystemClock, OsRng).map_err(db_err)?;
         init_wallet_db(&mut db, None).map_err(db_err)?;
-        Ok(Self { db, params, cache: MemBlockCache::new() })
+        Ok(Self { db, path, params, cache: MemBlockCache::new() })
     }
 
     pub fn params(&self) -> &P {
@@ -164,16 +202,18 @@ impl<P: Parameters + Clone + Send + Sync + 'static> Wallet<P> {
         vault: &Vault,
         birthday: &AccountBirthday,
     ) -> Result<AccountUuid, WalletError> {
-        let account = self
-            .db
-            .import_account_ufvk(
-                name,
-                &vault.ufvk(),
-                birthday,
-                AccountPurpose::Spending { derivation: None },
-                None,
-            )
-            .map_err(db_err)?;
+        self.import_ufvk(name, &vault.ufvk(), birthday, AccountPurpose::Spending { derivation: None })
+    }
+
+    /// Tracks any account by its viewing key.
+    pub fn import_ufvk(
+        &mut self,
+        name: &str,
+        ufvk: &UnifiedFullViewingKey,
+        birthday: &AccountBirthday,
+        purpose: AccountPurpose,
+    ) -> Result<AccountUuid, WalletError> {
+        let account = self.db.import_account_ufvk(name, ufvk, birthday, purpose, None).map_err(db_err)?;
         Ok(account.id())
     }
 
@@ -204,7 +244,80 @@ impl<P: Parameters + Clone + Send + Sync + 'static> Wallet<P> {
     ) -> Result<(), WalletError> {
         zcash_client_backend::sync::run(client, &self.params, &self.cache, &mut self.db, 1000)
             .await
-            .map_err(|e| WalletError::Sync(format!("{e:?}")))
+            .map_err(|e| WalletError::Sync(format!("{e:?}")))?;
+        self.enhance(client).await
+    }
+
+    /// Compact blocks carry only the start of each note's ciphertext, which
+    /// is enough to find our notes and their values but not their memos. For
+    /// every transaction the wallet asks about, fetch the full transaction so
+    /// memos (sealed bids among them) and outgoing payments get stored.
+    async fn enhance(&mut self, client: &mut CompactTxStreamerClient<Channel>) -> Result<(), WalletError> {
+        use zcash_client_backend::data_api::wallet::decrypt_and_store_transaction;
+        use zcash_client_backend::data_api::{TransactionDataRequest, TransactionStatus};
+        use zcash_client_backend::proto::service::TxFilter;
+        use zcash_primitives::transaction::Transaction;
+        use zcash_protocol::consensus::BranchId;
+
+        // Each pass can uncover more work (a fetched transaction may spend
+        // notes that point at others), so repeat until nothing new is asked.
+        let mut done = std::collections::HashSet::new();
+        loop {
+            let requests = self.db.transaction_data_requests().map_err(db_err)?;
+            let mut progressed = false;
+            for request in requests {
+                let (txid, wants_data) = match request {
+                    TransactionDataRequest::Enhancement(txid) => (txid, true),
+                    TransactionDataRequest::GetStatus(txid) => (txid, false),
+                    // Tacit never uses transparent addresses.
+                    _ => continue,
+                };
+                if !done.insert((txid, wants_data)) {
+                    continue;
+                }
+                progressed = true;
+                let raw = client
+                    .get_transaction(TxFilter { block: None, index: 0, hash: txid.as_ref().to_vec() })
+                    .await;
+                let raw = match raw {
+                    Ok(r) => r.into_inner(),
+                    Err(status) if status.code() == tonic::Code::NotFound => {
+                        self.db
+                            .set_transaction_status(txid, TransactionStatus::TxidNotRecognized)
+                            .map_err(db_err)?;
+                        continue;
+                    }
+                    Err(e) => return Err(WalletError::Grpc(e.to_string())),
+                };
+                // lightwalletd reports 0 for mempool transactions and u64::MAX
+                // for ones that fell out of the main chain.
+                let mined = match raw.height {
+                    0 => None,
+                    u64::MAX => {
+                        self.db
+                            .set_transaction_status(txid, TransactionStatus::NotInMainChain)
+                            .map_err(db_err)?;
+                        continue;
+                    }
+                    h => Some(BlockHeight::from_u32(h as u32)),
+                };
+                if wants_data {
+                    let branch = BranchId::for_height(&self.params, mined.unwrap_or_else(|| {
+                        BlockHeight::from_u32(u32::MAX)
+                    }));
+                    let tx = Transaction::read(&raw.data[..], branch)
+                        .map_err(|e| WalletError::Sync(format!("bad transaction {txid}: {e}")))?;
+                    decrypt_and_store_transaction(&self.params, &mut self.db, &tx, mined).map_err(db_err)?;
+                } else if let Some(h) = mined {
+                    self.db
+                        .set_transaction_status(txid, TransactionStatus::Mined(h))
+                        .map_err(db_err)?;
+                }
+            }
+            if !progressed {
+                return Ok(());
+            }
+        }
     }
 
     /// Builds an unsigned, unproven PCZT paying `amount` from `account` to `to`.
@@ -215,21 +328,45 @@ impl<P: Parameters + Clone + Send + Sync + 'static> Wallet<P> {
         amount: u64,
         memo: Option<[u8; 512]>,
     ) -> Result<Pczt, WalletError> {
-        let to = Address::decode(&self.params, to)
-            .ok_or_else(|| WalletError::Build(format!("not an address on this network: {to}")))?;
-        let amount = Zatoshis::from_u64(amount).map_err(|_| WalletError::Build("bad amount".into()))?;
-        let memo = memo.map(|m| MemoBytes::from_bytes(&m).expect("512 bytes is a valid memo"));
-        let proposal = propose_standard_transfer_to_address::<_, _, Infallible>(
-            &mut self.db,
-            &self.params,
+        self.propose_payments(account, &[(to.to_string(), amount, memo)])
+    }
+
+    /// Builds an unsigned, unproven PCZT paying several recipients at once.
+    /// Change, if any, goes back to `account` in Ironwood.
+    pub fn propose_payments(
+        &mut self,
+        account: AccountUuid,
+        payments: &[(String, u64, Option<[u8; 512]>)],
+    ) -> Result<Pczt, WalletError> {
+        let payments = payments
+            .iter()
+            .map(|(to, amount, memo)| {
+                let addr = Address::decode(&self.params, to)
+                    .ok_or_else(|| WalletError::Build(format!("not an address on this network: {to}")))?;
+                let amount = Zatoshis::from_u64(*amount).map_err(|_| WalletError::Build("bad amount".into()))?;
+                let memo = memo.map(|m| MemoBytes::from_bytes(&m).expect("512 bytes is a valid memo"));
+                Payment::new(addr.to_zcash_address(&self.params), Some(amount), memo, None, None, vec![])
+                    .map_err(|e| WalletError::Build(format!("{e:?}")))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let request = TransactionRequest::new(payments).map_err(|e| WalletError::Build(format!("{e:?}")))?;
+
+        let input_selector = GreedyInputSelector::<Db<P>>::new();
+        let change_strategy = SingleOutputChangeStrategy::<StandardFeeRule, Db<P>>::new(
             StandardFeeRule::Zip317,
-            account,
-            ConfirmationsPolicy::MIN,
-            &to,
-            amount,
-            memo,
             None,
             ShieldedPool::Ironwood,
+            DustOutputPolicy::default(),
+        );
+        let proposal = propose_transfer::<_, _, _, _, Infallible>(
+            &mut self.db,
+            &self.params,
+            account,
+            &input_selector,
+            &change_strategy,
+            request,
+            ConfirmationsPolicy::MIN,
+            &SpendPolicy::default(),
             None,
             None,
         )
@@ -244,6 +381,82 @@ impl<P: Parameters + Clone + Send + Sync + 'static> Wallet<P> {
             BundlePadding::DEFAULT,
         )
         .map_err(|e| WalletError::Build(format!("{e:?}")))
+    }
+
+    fn read_only(&self) -> Result<rusqlite::Connection, WalletError> {
+        rusqlite::Connection::open_with_flags(&self.path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .map_err(db_err)
+    }
+
+    /// Ironwood notes `account` has received from others (not change), with
+    /// their memos and mined heights. For a vault these are the deposits.
+    pub fn received(&self, account: AccountUuid) -> Result<Vec<Received>, WalletError> {
+        let conn = self.read_only()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT t.txid, r.output_index, r.value, t.mined_height, r.memo
+                 FROM v_received_outputs r
+                 JOIN transactions t ON t.id_tx = r.transaction_id
+                 JOIN accounts a ON a.id = r.account_id
+                 WHERE a.uuid = ?1 AND r.pool = 4 AND r.is_change = 0
+                   AND t.mined_height IS NOT NULL
+                 ORDER BY t.mined_height, t.txid, r.output_index",
+            )
+            .map_err(db_err)?;
+        let rows = stmt
+            .query_map([account.expose_uuid().as_bytes().to_vec()], |row| {
+                let txid: Vec<u8> = row.get(0)?;
+                let index: u32 = row.get(1)?;
+                let mut id = txid.clone();
+                id.extend_from_slice(&index.to_le_bytes());
+                Ok(Received {
+                    id,
+                    txid: TxId::from_bytes(txid.try_into().unwrap_or([0; 32])),
+                    value: row.get::<_, i64>(2)? as u64,
+                    mined_height: row.get(3)?,
+                    memo: row.get::<_, Option<Vec<u8>>>(4)?.unwrap_or_default(),
+                })
+            })
+            .map_err(db_err)?;
+        rows.collect::<Result<_, _>>().map_err(db_err)
+    }
+
+    /// Payments `account` sent to others in `txid`, recovered with its
+    /// outgoing viewing key: (recipient address, value).
+    pub fn sent(&self, account: AccountUuid, txid: &TxId) -> Result<Vec<(String, u64)>, WalletError> {
+        let conn = self.read_only()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT to_address, value FROM v_tx_outputs
+                 WHERE txid = ?1 AND from_account_uuid = ?2 AND is_change = 0
+                   AND (to_account_uuid IS NULL OR to_account_uuid != ?2)",
+            )
+            .map_err(db_err)?;
+        let rows = stmt
+            .query_map(
+                rusqlite::params![txid.as_ref().to_vec(), account.expose_uuid().as_bytes().to_vec()],
+                |row| Ok((row.get::<_, Option<String>>(0)?.unwrap_or_default(), row.get::<_, i64>(1)? as u64)),
+            )
+            .map_err(db_err)?;
+        rows.collect::<Result<_, _>>().map_err(db_err)
+    }
+
+    /// Mined transactions that spent notes belonging to `account`.
+    pub fn spends_from(&self, account: AccountUuid) -> Result<Vec<TxId>, WalletError> {
+        let conn = self.read_only()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT DISTINCT txid FROM v_transactions
+                 WHERE account_uuid = ?1 AND account_balance_delta < 0 AND mined_height IS NOT NULL",
+            )
+            .map_err(db_err)?;
+        let rows = stmt
+            .query_map([account.expose_uuid().as_bytes().to_vec()], |row| {
+                let txid: Vec<u8> = row.get(0)?;
+                Ok(TxId::from_bytes(txid.try_into().unwrap_or([0; 32])))
+            })
+            .map_err(db_err)?;
+        rows.collect::<Result<_, _>>().map_err(db_err)
     }
 
     /// Stores a fully signed PCZT as a transaction and sends it to the network.

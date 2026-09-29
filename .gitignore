@@ -6,3 +6,5 @@ dist
 regtest/faucet.seed
 regtest/zebrad.toml
 regtest/e2e/
+regtest/auction/
+regtest/*.log

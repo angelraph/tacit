@@ -22,4 +22,9 @@ rusqlite = "0.37"
 secrecy = "0.8"
 async-trait = "0.1"
 zip32 = "0.2"
+zip321 = "0.9"
+ureq = "3"
+serde_json = "1"
+zcash_address = "0.13"
+tacit-core = { path = "../tacit-core" }
 tacit-regtest = { path = "../tacit-regtest" }
