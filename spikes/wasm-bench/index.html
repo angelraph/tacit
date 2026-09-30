@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ironwood proving in the browser</title>
+<style>
+  body { font: 15px/1.5 system-ui, sans-serif; margin: 2rem auto; max-width: 40rem; padding: 0 1rem; }
+  pre { background: #f4f4f4; padding: 1rem; border-radius: 6px; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<h1>Ironwood proving in the browser</h1>
+<p>Builds the post NU6.3 proving key, then creates real Ironwood proofs in a Web Worker. Add <code>?threads</code> to the URL for the multithreaded build.</p>
+<pre id="log"></pre>
+<script type="module">
+  const log = document.getElementById("log");
+  const lines = [];
+  const out = (s) => { lines.push(s); log.textContent = lines.join("\n"); };
+  const worker = new Worker("./worker.js", { type: "module" });
+  worker.onmessage = ({ data }) => {
+    if (data.step === "key") {
+      out(`wasm loaded in ${data.initMs.toFixed(0)} ms`);
+      out(`proving key built in ${(data.keyMs / 1000).toFixed(1)} s`);
+    } else if (data.step === "proof") {
+      out(`proof, ${data.outputs} output(s): ${(data.ms / 1000).toFixed(1)} s (${data.bytes} bytes)`);
+    } else if (data.step === "done") {
+      out("done");
+      window.benchDone = true;
+    }
+  };
+  worker.onerror = (e) => { out("worker error: " + e.message); window.benchDone = true; };
+  // Two outputs is a bid (bond + change); five is a small settlement.
+  const threads = new URLSearchParams(location.search).has("threads");
+  out(threads
+    ? `multithreaded, ${navigator.hardwareConcurrency} threads, isolated: ${crossOriginIsolated}`
+    : "single threaded");
+  worker.postMessage({ runs: [2, 2, 5], threads });
+</script>
+</body>
+</html>

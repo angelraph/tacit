@@ -8,3 +8,5 @@ regtest/zebrad.toml
 regtest/e2e/
 regtest/auction/
 regtest/*.log
+spikes/wasm-bench/pkg/
+spikes/wasm-bench/pkg-threads/
