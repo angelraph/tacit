@@ -3,39 +3,77 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Ironwood proving in the browser</title>
+<title>Tacit prover</title>
+<meta name="description" content="Real Zcash Ironwood zero-knowledge proofs, created in your browser.">
 <style>
-  body { font: 15px/1.5 system-ui, sans-serif; margin: 2rem auto; max-width: 40rem; padding: 0 1rem; }
-  pre { background: #f4f4f4; padding: 1rem; border-radius: 6px; white-space: pre-wrap; }
+  :root { --bg: #fbfaf8; --fg: #1d1c1a; --muted: #6b6760; --panel: #f0eee9; --accent: #2f5d50; --line: #dcd8cf; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #151514; --fg: #ecebe7; --muted: #a29e95; --panel: #201f1d; --accent: #8cc3b0; --line: #34322e; }
+  }
+  * { box-sizing: border-box; }
+  body { background: var(--bg); color: var(--fg); font: 16px/1.6 system-ui, sans-serif; margin: 0; }
+  main { max-width: 42rem; margin: 0 auto; padding: 3rem 16px; }
+  h1 { font-size: 1.9rem; margin: 0 0 .25rem; letter-spacing: -.01em; }
+  .sub { color: var(--muted); margin: 0 0 2rem; }
+  p { margin: 0 0 1rem; }
+  button { font: inherit; font-weight: 600; background: var(--accent); color: var(--bg); border: 0; border-radius: 8px; padding: .65rem 1.2rem; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  label { color: var(--muted); margin-left: 1rem; font-size: .95rem; }
+  pre { background: var(--panel); border: 1px solid var(--line); padding: 1rem; border-radius: 8px; white-space: pre-wrap; min-height: 6rem; font-size: .9rem; margin: 1.5rem 0; }
+  .note { color: var(--muted); font-size: .9rem; border-top: 1px solid var(--line); padding-top: 1rem; }
+  code { font-size: .9em; }
 </style>
 </head>
 <body>
-<h1>Ironwood proving in the browser</h1>
-<p>Builds the post NU6.3 proving key, then creates real Ironwood proofs in a Web Worker. Add <code>?threads</code> to the URL for the multithreaded build.</p>
-<pre id="log"></pre>
+<main>
+<h1>Tacit prover</h1>
+<p class="sub">Real Zcash Ironwood proofs, made in your browser.</p>
+<p>Tacit runs sealed-bid auctions on Zcash. Every bid is a fully shielded deposit, so each bidder's own device has to produce a zero-knowledge proof for it. This page does that work: it builds the Ironwood (post NU6.3) proving key, then creates the same proofs a bid and a small settlement need.</p>
+<p>Nothing leaves your machine. On a 4 core laptop, the key takes about 18 s and a bid proof about 20 s.</p>
+<button id="run">Run the benchmark</button>
+<label><input type="checkbox" id="threads"> use all cores</label>
+<pre id="log">Press run. Keep this tab in front: browsers slow down hidden tabs a lot.</pre>
+<p class="note">Part of <strong>Tacit</strong>, a Zecathon entry: sealed bids timelocked with drand, 2 of 3 FROST vaults, and a public viewing key so anyone can audit an auction without learning who took part.</p>
+</main>
 <script type="module">
   const log = document.getElementById("log");
+  const run = document.getElementById("run");
+  const threadsBox = document.getElementById("threads");
+  // Threads need SharedArrayBuffer, which needs a cross-origin isolated page.
+  threadsBox.checked = crossOriginIsolated;
+  threadsBox.disabled = !crossOriginIsolated;
+  if (new URLSearchParams(location.search).has("single")) threadsBox.checked = false;
+
   const lines = [];
   const out = (s) => { lines.push(s); log.textContent = lines.join("\n"); };
-  const worker = new Worker("./worker.js", { type: "module" });
-  worker.onmessage = ({ data }) => {
-    if (data.step === "key") {
-      out(`wasm loaded in ${data.initMs.toFixed(0)} ms`);
-      out(`proving key built in ${(data.keyMs / 1000).toFixed(1)} s`);
-    } else if (data.step === "proof") {
-      out(`proof, ${data.outputs} output(s): ${(data.ms / 1000).toFixed(1)} s (${data.bytes} bytes)`);
-    } else if (data.step === "done") {
-      out("done");
-      window.benchDone = true;
-    }
+
+  run.onclick = () => {
+    run.disabled = true;
+    threadsBox.disabled = true;
+    lines.length = 0;
+    const threads = threadsBox.checked;
+    out(threads ? `multithreaded, ${navigator.hardwareConcurrency} threads` : "single threaded");
+    out("loading and building the proving key...");
+    const worker = new Worker("./worker.js", { type: "module" });
+    worker.onmessage = ({ data }) => {
+      if (data.step === "key") {
+        out(`wasm loaded in ${data.initMs.toFixed(0)} ms`);
+        out(`proving key built in ${(data.keyMs / 1000).toFixed(1)} s`);
+      } else if (data.step === "proof") {
+        const what = data.outputs === 2 ? "bid" : "settlement";
+        out(`${what} proof (${data.outputs} outputs): ${(data.ms / 1000).toFixed(1)} s, ${data.bytes} bytes`);
+      } else if (data.step === "done") {
+        out("done");
+        window.benchDone = true;
+        run.disabled = false;
+        threadsBox.disabled = !crossOriginIsolated;
+        worker.terminate();
+      }
+    };
+    worker.onerror = (e) => { out("error: " + e.message); window.benchDone = true; run.disabled = false; };
+    // Two outputs is a bid (bond plus change); five is a small settlement.
+    worker.postMessage({ runs: [2, 2, 5], threads });
   };
-  worker.onerror = (e) => { out("worker error: " + e.message); window.benchDone = true; };
-  // Two outputs is a bid (bond + change); five is a small settlement.
-  const threads = new URLSearchParams(location.search).has("threads");
-  out(threads
-    ? `multithreaded, ${navigator.hardwareConcurrency} threads, isolated: ${crossOriginIsolated}`
-    : "single threaded");
-  worker.postMessage({ runs: [2, 2, 5], threads });
 </script>
 </body>
 </html>

@@ -1,0 +1,22 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "Cross-Origin-Opener-Policy", "value": "same-origin" },
+        { "key": "Cross-Origin-Embedder-Policy", "value": "require-corp" }
+      ]
+    },
+    {
+      "source": "/(.*)\\.wasm",
+      "headers": [{ "key": "Content-Type", "value": "application/wasm" }]
+    }
+  ],
+  "rewrites": [
+    { "source": "/pkg-threads/", "destination": "/pkg-threads/tacit_wasm.js" },
+    { "source": "/pkg-threads", "destination": "/pkg-threads/tacit_wasm.js" },
+    { "source": "/pkg/", "destination": "/pkg/tacit_wasm.js" },
+    { "source": "/pkg", "destination": "/pkg/tacit_wasm.js" }
+  ]
+}
