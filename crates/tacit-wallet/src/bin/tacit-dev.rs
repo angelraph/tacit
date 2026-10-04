@@ -8,6 +8,8 @@
 //!       With Zebra running from that config: mines coinbase to the faucet,
 //!       creates a 2 of 3 FROST vault, deposits into it, and spends out of it
 //!       with seats 1 and 3, checking balances on chain at every step.
+//!       The three seats run on separate threads and only talk through a
+//!       local coordinator, in sealed envelopes, as separate devices would.
 //!
 //!   tacit-dev auction-e2e
 //!       A full sealed-bid auction: three bidders deposit identical bonds
@@ -15,20 +17,19 @@
 //!       in one transaction signed by seller and operator, and an auditor
 //!       holding nothing but the published terms verifies the result.
 
-use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+use std::time::Duration;
+
+use pczt::Pczt;
 use rand_core::{OsRng, RngCore};
-use tacit_vault::dkg::{self, seat};
-use tacit_vault::frost::keys::dkg::round1;
-use tacit_vault::frost::keys::{KeyPackage, PublicKeyPackage};
-use tacit_vault::frost::Identifier;
-use tacit_vault::Vault;
-use tacit_wallet::{
-    connect, ironwood_proving_key, prove, regtest, sign_with_usk, sign_with_vault, Wallet,
-};
+use tacit_core::envelope::SeatKey;
+use tacit_vault::session::{SeatPub, VaultShare};
+use tacit_vault::{SigningRequest, Vault};
+use tacit_wallet::relay::{self, Relay};
+use tacit_wallet::{connect, ironwood_proving_key, prove, regtest, sign_with_usk, Wallet};
 use zcash_keys::keys::{UnifiedAddressRequest, UnifiedSpendingKey};
 use zcash_protocol::consensus::Parameters;
 use zip32::AccountId;
@@ -83,42 +84,101 @@ fn mine(n: u32) {
     println!("   mined {n} block(s), tip is now {h}");
 }
 
-fn run_dkg() -> (BTreeMap<Identifier, KeyPackage>, PublicKeyPackage) {
-    let seats: Vec<Identifier> = (1..=3).map(seat).collect();
-    let others = |me: &Identifier, all: &BTreeMap<Identifier, round1::Package>| {
-        all.iter()
-            .filter(|(id, _)| *id != me)
-            .map(|(id, p)| (*id, p.clone()))
-            .collect::<BTreeMap<_, _>>()
-    };
-    let (mut r1s, mut r1p) = (BTreeMap::new(), BTreeMap::new());
-    for id in &seats {
-        let (s, p) = dkg::start(*id, OsRng).unwrap();
-        r1s.insert(*id, s);
-        r1p.insert(*id, p);
+/// How long a seat waits on the others before giving up.
+const SEAT_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// The three seats of a vault. Each seat only ever touches its own secrets;
+/// everything between them goes through the coordinator sealed.
+struct Seats {
+    url: String,
+    keys: Vec<[u8; 32]>,
+    pubs: Vec<SeatPub>,
+    shares: Vec<VaultShare>,
+}
+
+impl Seats {
+    fn vault(&self) -> Vault {
+        self.shares[0].vault.clone()
     }
-    let (mut r2s, mut outbox) = (BTreeMap::new(), BTreeMap::new());
-    for id in &seats {
-        let (s, out) = dkg::share(r1s.remove(id).unwrap(), &others(id, &r1p)).unwrap();
-        r2s.insert(*id, s);
-        outbox.insert(*id, out);
-    }
-    let mut keys = BTreeMap::new();
-    let mut public = None;
-    for id in &seats {
-        let inbox = outbox
+}
+
+/// Starts a coordinator on a free local port and runs key generation with
+/// each seat on its own thread.
+async fn vault_over_coordinator() -> Seats {
+    let state = tacit_coordinator::AppState::in_memory().unwrap();
+    let url = tacit_coordinator::spawn("127.0.0.1:0", state).await.unwrap();
+    tokio::task::spawn_blocking(move || {
+        let keys: Vec<[u8; 32]> = (0..3).map(|_| SeatKey::generate().to_bytes()).collect();
+        let pubs: Vec<SeatPub> = keys.iter().map(|k| SeatKey::from_bytes(*k).public()).collect();
+        let room = Relay::new(&url).open_room(&pubs).unwrap();
+        let threads: Vec<_> = keys
             .iter()
-            .filter(|(from, _)| *from != id)
-            .map(|(from, out)| (*from, out[id].clone()))
+            .map(|k| {
+                let (k, url, room, pubs) = (*k, url.clone(), room.clone(), pubs.clone());
+                std::thread::spawn(move || {
+                    relay::run_dkg(&Relay::new(url), SeatKey::from_bytes(k), &room, pubs, SEAT_TIMEOUT)
+                })
+            })
             .collect();
-        let (kp, pkp) = dkg::finish(&r2s[id], &others(id, &r1p), &inbox).unwrap();
-        if let Some(p) = &public {
-            assert_eq!(p, &pkp, "all seats must agree on the group key");
-        }
-        public = Some(pkp);
-        keys.insert(*id, kp);
-    }
-    (keys, public.unwrap())
+        let shares: Vec<VaultShare> = threads.into_iter().map(|t| t.join().unwrap().unwrap()).collect();
+        let fvk = shares[0].vault.fvk().to_bytes();
+        assert!(shares.iter().all(|s| s.vault.fvk().to_bytes() == fvk), "all seats must hold the same vault");
+        println!("   key generation over {url}, room {}...", &room[..8]);
+        Seats { url, keys, pubs, shares }
+    })
+    .await
+    .unwrap()
+}
+
+/// Signs `pczt` with two seats in a fresh room: `coordinator` hands out the
+/// PCZT and aggregates, `cosigner` checks what it is asked to sign first.
+async fn sign_over_coordinator(seats: &Seats, pczt: Pczt, coordinator: u16, cosigner: u16) -> Pczt {
+    let (url, pubs, vault) = (seats.url.clone(), seats.pubs.clone(), seats.vault());
+    let (ck, sk) = (seats.keys[coordinator as usize - 1], seats.keys[cosigner as usize - 1]);
+    let c_kp = seats.shares[coordinator as usize - 1].key_package.clone();
+    let s_kp = seats.shares[cosigner as usize - 1].key_package.clone();
+    tokio::task::spawn_blocking(move || {
+        let relay = Relay::new(&url);
+        let room = relay.open_room(&pubs).unwrap();
+        let signer = {
+            let (url, room, pubs) = (url.clone(), room.clone(), pubs.clone());
+            let coord_pub = pubs[coordinator as usize - 1];
+            std::thread::spawn(move || {
+                let approve = |p: &Pczt| match SigningRequest::from_pczt(p) {
+                    Ok(req) => {
+                        println!(
+                            "   seat {cosigner} asked to sign {} spend(s), sighash {}...",
+                            req.spends.len(),
+                            hex::encode(&req.sighash[..8])
+                        );
+                        true
+                    }
+                    Err(e) => {
+                        println!("   seat {cosigner} refuses an unreadable PCZT: {e}");
+                        false
+                    }
+                };
+                let key = SeatKey::from_bytes(sk);
+                relay::run_signer(&Relay::new(url), key, &room, pubs, coord_pub, s_kp, approve, SEAT_TIMEOUT)
+            })
+        };
+        let signed = relay::run_coordinator(
+            &relay,
+            SeatKey::from_bytes(ck),
+            &room,
+            pubs,
+            vault,
+            pczt,
+            &[coordinator, cosigner],
+            Some(c_kp),
+            SEAT_TIMEOUT,
+        )
+        .unwrap();
+        signer.join().unwrap().unwrap();
+        signed
+    })
+    .await
+    .unwrap()
 }
 
 async fn vault_e2e() {
@@ -133,8 +193,8 @@ async fn vault_e2e() {
     println!("   faucet spendable: {} ({:?})", zec(faucet.balance()), t.elapsed());
 
     let t = step("2 of 3 FROST vault via DKG");
-    let (keys, public) = run_dkg();
-    let vault = Vault::create(public, OsRng).unwrap();
+    let seats = vault_over_coordinator().await;
+    let vault = seats.vault();
     let vault_birthday = Wallet::<zcash_protocol::local_consensus::LocalNetwork>::birthday_now(&mut client)
         .await
         .unwrap();
@@ -162,8 +222,7 @@ async fn vault_e2e() {
     let back_to = faucet.wallet.next_address(faucet.account).unwrap();
     let pczt = vault_wallet.propose(vault_account, &back_to, ZEC / 2, None).unwrap();
     let pczt = prove(pczt, &pk).unwrap();
-    let signers: BTreeMap<_, _> = [1u16, 3].iter().map(|n| (seat(*n), keys[&seat(*n)].clone())).collect();
-    let pczt = sign_with_vault(pczt, &vault, &signers).unwrap();
+    let pczt = sign_over_coordinator(&seats, pczt, 1, 3).await;
     let txid = vault_wallet.finish_and_send(&mut client, pczt).await.unwrap();
     println!("   sent {txid} ({:?})", t.elapsed());
     mine(1);
@@ -282,8 +341,8 @@ async fn auction_e2e() {
     for name in ["alice", "bob", "carol"] {
         bidders.push((name, Party::new(&data, name, None, &mut client).await));
     }
-    let (keys, public) = run_dkg();
-    let vault = Vault::create(public, OsRng).unwrap();
+    let seats = vault_over_coordinator().await;
+    let vault = seats.vault();
     let created = Wallet::<Net>::birthday_now(&mut client).await.unwrap();
     let mut vault_wallet = Wallet::open(data.join("vault.sqlite"), params.clone()).unwrap();
     let vault_account = vault_wallet.import_vault("vault", &vault, &created).unwrap();
@@ -368,9 +427,9 @@ async fn auction_e2e() {
         .collect();
     let pczt = vault_wallet.propose_payments(vault_account, &payments).unwrap();
     let pczt = prove(pczt, &pk).unwrap();
-    // Seat 1 is the seller, seat 2 the operator, seat 3 the arbiter.
-    let signers: BTreeMap<_, _> = [1u16, 2].iter().map(|n| (seat(*n), keys[&seat(*n)].clone())).collect();
-    let pczt = sign_with_vault(pczt, &vault, &signers).unwrap();
+    // Seat 1 is the seller, seat 2 the operator, seat 3 the arbiter. The
+    // operator proved the settlement, so it coordinates; the seller cosigns.
+    let pczt = sign_over_coordinator(&seats, pczt, 2, 1).await;
     let txid = vault_wallet.finish_and_send(&mut client, pczt).await.unwrap();
     mine(1);
     println!("   settled in {} ({:?})", &txid.to_string()[..16], t.elapsed());

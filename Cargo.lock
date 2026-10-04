@@ -2837,6 +2837,7 @@ dependencies = [
 name = "tacit-vault"
 version = "0.1.0"
 dependencies = [
+ "blake2b_simd",
  "frost-core",
  "frost-rerandomized",
  "hex",
@@ -2846,6 +2847,7 @@ dependencies = [
  "rand 0.8.8",
  "rand_core 0.6.4",
  "reddsa",
+ "tacit-core",
  "thiserror 2.0.21",
  "zcash_keys",
  "zcash_primitives",
@@ -2864,6 +2866,7 @@ dependencies = [
  "rusqlite",
  "secrecy",
  "serde_json",
+ "tacit-coordinator",
  "tacit-core",
  "tacit-regtest",
  "tacit-vault",

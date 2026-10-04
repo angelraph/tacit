@@ -71,6 +71,17 @@ pub fn router(state: AppState) -> Router {
         .with_state(state)
 }
 
+/// Serves a coordinator on the current tokio runtime in the background and
+/// returns its base URL. Pass port 0 to get a free one.
+pub async fn spawn(addr: &str, state: AppState) -> std::io::Result<String> {
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    let local = listener.local_addr()?;
+    tokio::spawn(async move {
+        axum::serve(listener, router(state)).await.expect("coordinator stopped");
+    });
+    Ok(format!("http://{local}"))
+}
+
 pub struct ApiError(StatusCode, String);
 
 impl IntoResponse for ApiError {

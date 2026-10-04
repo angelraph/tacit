@@ -57,6 +57,7 @@ use tacit_vault::Vault;
 pub mod auction;
 pub mod cache;
 pub mod drand;
+pub mod relay;
 use cache::MemBlockCache;
 
 pub type Db<P> = WalletDb<rusqlite::Connection, P, SystemClock, OsRng>;

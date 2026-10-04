@@ -30,6 +30,7 @@ use frost::round2::SignatureShare;
 use frost::{Identifier, SigningPackage};
 
 pub mod dkg;
+pub mod session;
 
 #[derive(Debug, thiserror::Error)]
 pub enum VaultError {
