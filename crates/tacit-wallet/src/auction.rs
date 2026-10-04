@@ -147,6 +147,61 @@ pub async fn verify<P: Parameters + Clone + Send + Sync + 'static>(
     Ok(Verdict { outcome, settlement: Some(settlement), missing, unexpected })
 }
 
+/// What a cosigner checks before signing a settlement: the PCZT's
+/// value-carrying Ironwood outputs must be exactly the payments the rules
+/// demand (`expected`, from [`settlement_payments`]), and it must spend
+/// `deposits` notes, no more and no fewer. Zero-value outputs (padding and the
+/// empty change note) are allowed. Returns the problems found, if any.
+pub fn check_settlement(
+    params: &impl Parameters,
+    pczt: &pczt::Pczt,
+    expected: &[(String, u64)],
+    deposits: usize,
+) -> Result<(), String> {
+    let mut actual = Vec::new();
+    let mut spends = 0;
+    pczt::roles::verifier::Verifier::new(pczt.clone())
+        .with_ironwood(|bundle| -> Result<(), pczt::roles::verifier::OrchardError<()>> {
+            for action in bundle.actions() {
+                if action.spend().value().map_or(0, |v| v.inner()) > 0 {
+                    spends += 1;
+                }
+                let out = action.output();
+                let value = out.value().map(|v| v.inner());
+                match (value, out.recipient()) {
+                    (Some(0), _) => {}
+                    (Some(v), Some(to)) => actual.push((address_from_raw(params, &to.to_raw_address_bytes()), v)),
+                    _ => actual.push(("<hidden recipient or value>".into(), value.unwrap_or(0))),
+                }
+            }
+            Ok(())
+        })
+        .map_err(|e| format!("can't read the Ironwood bundle: {e:?}"))?;
+
+    // Compare by raw receiver so different encodings of one address match.
+    let canon = |list: &[(String, u64)]| -> Vec<(String, u64)> {
+        list.iter()
+            .map(|(a, v)| (raw_receiver(params, a).map(|r| address_from_raw(params, &r)).unwrap_or(a.clone()), *v))
+            .collect()
+    };
+    let (missing, unexpected) = diff(&canon(expected), &canon(&actual));
+    let mut problems = Vec::new();
+    for (a, v) in &missing {
+        problems.push(format!("missing payment of {v} zat to {a}"));
+    }
+    for (a, v) in &unexpected {
+        problems.push(format!("unexpected payment of {v} zat to {a}"));
+    }
+    if spends != deposits {
+        problems.push(format!("spends {spends} notes but the vault holds {deposits} deposits"));
+    }
+    if problems.is_empty() {
+        Ok(())
+    } else {
+        Err(problems.join("; "))
+    }
+}
+
 /// Multiset difference both ways.
 fn diff(expected: &[(String, u64)], actual: &[(String, u64)]) -> (Vec<(String, u64)>, Vec<(String, u64)>) {
     let mut left: BTreeMap<&(String, u64), i64> = BTreeMap::new();

@@ -1,0 +1,27 @@
+[package]
+name = "tacit-cli"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "The tacit command: shielded wallet, FROST vault seats, and sealed-bid auctions"
+
+[[bin]]
+name = "tacit"
+path = "src/main.rs"
+
+[dependencies]
+tacit-core = { path = "../tacit-core", features = ["serde"] }
+tacit-vault = { path = "../tacit-vault" }
+tacit-wallet = { path = "../tacit-wallet" }
+clap = { version = "4", features = ["derive", "env"] }
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+hex = "0.4"
+rand_core = { version = "0.6", features = ["getrandom"] }
+pczt = "0.9.3"
+zcash_keys = { version = "0.16.1", features = ["orchard", "unstable-frost"] }
+zcash_protocol = { version = "0.10", features = ["local-consensus"] }
+zcash_client_sqlite = { version = "0.22.0", features = ["orchard", "multicore", "transparent-inputs", "serde"] }
+zip32 = "0.2"

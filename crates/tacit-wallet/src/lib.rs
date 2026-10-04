@@ -163,6 +163,17 @@ impl<P: Parameters + Clone + Send + Sync + 'static> Wallet<P> {
         &self.params
     }
 
+    /// Height of the server's chain tip. (A birthday's `height()` is the first
+    /// block it scans, one above the tip it was taken at; don't confuse them.)
+    pub async fn tip(client: &mut CompactTxStreamerClient<Channel>) -> Result<u32, WalletError> {
+        let tip = client
+            .get_latest_block(ChainSpec::default())
+            .await
+            .map_err(|e| WalletError::Grpc(e.to_string()))?
+            .into_inner();
+        u32::try_from(tip.height).map_err(|_| WalletError::Grpc("tip height out of range".into()))
+    }
+
     /// Birthday at the server's current tip, for accounts created now.
     pub async fn birthday_now(
         client: &mut CompactTxStreamerClient<Channel>,
@@ -174,7 +185,14 @@ impl<P: Parameters + Clone + Send + Sync + 'static> Wallet<P> {
             .into_inner();
         // Anchor at the tip: the account scans from the next block on. (Asking
         // for height 0 doesn't work anyway; protobuf can't tell it from "unset".)
-        let height = tip.height;
+        Self::birthday_at(client, tip.height).await
+    }
+
+    /// Birthday anchored at `height`, for accounts that came into being then.
+    pub async fn birthday_at(
+        client: &mut CompactTxStreamerClient<Channel>,
+        height: u64,
+    ) -> Result<AccountBirthday, WalletError> {
         let ts = client
             .get_tree_state(BlockId { height, hash: vec![] })
             .await

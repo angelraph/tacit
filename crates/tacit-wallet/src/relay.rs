@@ -27,26 +27,83 @@ pub enum RelayError {
 
 pub struct Relay {
     base: String,
+    agent: ureq::Agent,
 }
 
 impl Relay {
     pub fn new(base: impl Into<String>) -> Self {
-        Relay { base: base.into().trim_end_matches('/').to_string() }
+        // Read error bodies ourselves; the coordinator explains what went wrong.
+        let agent = ureq::Agent::config_builder()
+            .http_status_as_error(false)
+            .timeout_global(Some(Duration::from_secs(30)))
+            .build()
+            .into();
+        Relay { base: base.into().trim_end_matches('/').to_string(), agent }
+    }
+
+    fn read(res: Result<ureq::http::Response<ureq::Body>, ureq::Error>) -> Result<Value, RelayError> {
+        let mut res = res.map_err(|e| RelayError::Http(e.to_string()))?;
+        let status = res.status();
+        let text = res.body_mut().read_to_string().map_err(|e| RelayError::Http(e.to_string()))?;
+        if !status.is_success() {
+            let msg = serde_json::from_str::<Value>(&text)
+                .ok()
+                .and_then(|v| v["error"].as_str().map(str::to_string))
+                .unwrap_or(text);
+            return Err(RelayError::Http(format!("{status}: {msg}")));
+        }
+        serde_json::from_str(&text).map_err(|e| RelayError::Http(e.to_string()))
     }
 
     fn post(&self, path: &str, body: &Value) -> Result<Value, RelayError> {
-        let mut res = ureq::post(&format!("{}{path}", self.base))
-            .header("content-type", "application/json")
-            .send(body.to_string())
-            .map_err(|e| RelayError::Http(e.to_string()))?;
-        let text = res.body_mut().read_to_string().map_err(|e| RelayError::Http(e.to_string()))?;
-        serde_json::from_str(&text).map_err(|e| RelayError::Http(e.to_string()))
+        Self::read(
+            self.agent
+                .post(&format!("{}{path}", self.base))
+                .header("content-type", "application/json")
+                .send(body.to_string()),
+        )
     }
 
     fn get(&self, path: &str) -> Result<Value, RelayError> {
-        let mut res = ureq::get(&format!("{}{path}", self.base)).call().map_err(|e| RelayError::Http(e.to_string()))?;
-        let text = res.body_mut().read_to_string().map_err(|e| RelayError::Http(e.to_string()))?;
-        serde_json::from_str(&text).map_err(|e| RelayError::Http(e.to_string()))
+        Self::read(self.agent.get(&format!("{}{path}", self.base)).call())
+    }
+
+    /// Publishes auction terms (as JSON) and returns the id the coordinator
+    /// computed for them.
+    pub fn publish_auction(&self, terms: &Value) -> Result<String, RelayError> {
+        let rec = self.post("/v1/auctions", terms)?;
+        rec["id"].as_str().map(str::to_string).ok_or_else(|| RelayError::Http(format!("bad auction reply: {rec}")))
+    }
+
+    /// The published terms of one auction, as JSON.
+    pub fn auction(&self, id: &str) -> Result<Value, RelayError> {
+        Ok(self.get(&format!("/v1/auctions/{id}"))?["terms"].take())
+    }
+
+    /// Every published auction as (id, terms JSON).
+    pub fn auctions(&self) -> Result<Vec<(String, Value)>, RelayError> {
+        let list = self.get("/v1/auctions")?;
+        let list = list.as_array().ok_or_else(|| RelayError::Http(format!("bad list reply: {list}")))?;
+        Ok(list
+            .iter()
+            .map(|r| (r["id"].as_str().unwrap_or_default().to_string(), r["terms"].clone()))
+            .collect())
+    }
+
+    /// The seats of a room, in order.
+    pub fn room(&self, id: &str) -> Result<Vec<SeatPub>, RelayError> {
+        let room = self.get(&format!("/v1/rooms/{id}"))?;
+        room["seats"]
+            .as_array()
+            .ok_or_else(|| RelayError::Http(format!("bad room reply: {room}")))?
+            .iter()
+            .map(|s| {
+                hex::decode(s.as_str().unwrap_or_default())
+                    .ok()
+                    .and_then(|b| b.try_into().ok())
+                    .ok_or_else(|| RelayError::Http(format!("bad seat key in room: {s}")))
+            })
+            .collect()
     }
 
     /// Opens a room for these seats and returns its id.

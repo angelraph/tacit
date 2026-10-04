@@ -11,6 +11,13 @@
 //!       The three seats run on separate threads and only talk through a
 //!       local coordinator, in sealed envelopes, as separate devices would.
 //!
+//!   tacit-dev fund <address> <zatoshi>
+//!       Pays regtest coins from the dev faucet to any address, then mines a
+//!       block so they confirm. For trying the `tacit` CLI by hand.
+//!
+//!   tacit-dev mine <n>
+//!       Mines n regtest blocks.
+//!
 //!   tacit-dev auction-e2e
 //!       A full sealed-bid auction: three bidders deposit identical bonds
 //!       with timelocked bids, the drand round opens them, the vault settles
@@ -316,6 +323,16 @@ async fn faucet(client: &mut tacit_wallet::GrpcClient) -> Party {
     party
 }
 
+async fn fund(to: &str, zat: u64) {
+    let mut client = connect(GRPC).await.expect("Zebra's lightwalletd endpoint is not reachable on 9067");
+    let mut faucet = faucet(&mut client).await;
+    let pczt = faucet.wallet.propose(faucet.account, to, zat, None).unwrap();
+    let pczt = sign_with_usk(prove(pczt, &ironwood_proving_key()).unwrap(), faucet.usk.as_ref().unwrap()).unwrap();
+    let txid = faucet.wallet.finish_and_send(&mut client, pczt).await.unwrap();
+    mine(1);
+    println!("sent {} to {to} in {txid}", zec(zat));
+}
+
 async fn auction_e2e() {
     use tacit_core::auction::{self, PriceRule, Terms};
     use tacit_core::seal;
@@ -461,8 +478,16 @@ async fn main() {
         Some("init") => init(args.get(2).map(String::as_str).unwrap_or("/tmp/tacit-zebra")),
         Some("vault-e2e") => vault_e2e().await,
         Some("auction-e2e") => auction_e2e().await,
+        Some("mine") => mine(args.get(2).and_then(|n| n.parse().ok()).unwrap_or(1)),
+        Some("fund") => {
+            let (Some(to), Some(zat)) = (args.get(2), args.get(3).and_then(|z| z.parse::<u64>().ok())) else {
+                eprintln!("usage: tacit-dev fund <address> <zatoshi>");
+                std::process::exit(2);
+            };
+            fund(to, zat).await
+        }
         _ => {
-            eprintln!("usage: tacit-dev init <zebra-state-dir> | tacit-dev vault-e2e | tacit-dev auction-e2e");
+            eprintln!("usage: tacit-dev init <zebra-state-dir> | vault-e2e | auction-e2e | fund <address> <zatoshi> | mine <n>");
             std::process::exit(2);
         }
     }
