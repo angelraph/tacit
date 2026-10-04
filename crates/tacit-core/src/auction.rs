@@ -20,6 +20,7 @@ pub const MARGINAL_FEE: u64 = 5_000;
 pub const GRACE_ACTIONS: u64 = 2;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "snake_case"))]
 pub enum PriceRule {
     /// The winner pays their own bid.
     FirstPrice,
@@ -29,6 +30,7 @@ pub enum PriceRule {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Terms {
     /// "main", "test" or "regtest".
     pub network: String,

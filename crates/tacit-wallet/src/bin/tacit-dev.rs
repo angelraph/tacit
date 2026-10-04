@@ -123,24 +123,14 @@ fn run_dkg() -> (BTreeMap<Identifier, KeyPackage>, PublicKeyPackage) {
 
 async fn vault_e2e() {
     let params = regtest();
-    let seed = faucet_seed();
     let mut client = connect(GRPC).await.expect("Zebra's lightwalletd endpoint is not reachable on 9067");
-
     let data = regtest_dir().join("e2e");
     let _ = fs::remove_dir_all(&data);
     fs::create_dir_all(&data).unwrap();
-    let mut wallet = Wallet::open(data.join("wallet.sqlite"), params.clone()).unwrap();
 
     let t = step("faucet wallet");
-    let birthday = Wallet::<zcash_protocol::local_consensus::LocalNetwork>::birthday_now(&mut client)
-        .await
-        .unwrap();
-    let (faucet, usk) = wallet.create_account("faucet", seed, &birthday).unwrap();
-    mine(COINBASE_MATURITY + 2);
-    wallet.sync(&mut client).await.unwrap();
-    let faucet_funds = wallet.spendable(faucet).unwrap();
-    println!("   faucet spendable: {} ZEC ({:?})", faucet_funds as f64 / ZEC as f64, t.elapsed());
-    assert!(faucet_funds > 2 * ZEC, "coinbase should have matured into spendable Ironwood notes");
+    let mut faucet = faucet(&mut client).await;
+    println!("   faucet spendable: {} ({:?})", zec(faucet.balance()), t.elapsed());
 
     let t = step("2 of 3 FROST vault via DKG");
     let (keys, public) = run_dkg();
@@ -148,7 +138,8 @@ async fn vault_e2e() {
     let vault_birthday = Wallet::<zcash_protocol::local_consensus::LocalNetwork>::birthday_now(&mut client)
         .await
         .unwrap();
-    let vault_account = wallet.import_vault("vault", &vault, &vault_birthday).unwrap();
+    let mut vault_wallet = Wallet::open(data.join("vault.sqlite"), params.clone()).unwrap();
+    let vault_account = vault_wallet.import_vault("vault", &vault, &vault_birthday).unwrap();
     let vault_addr = vault.encode_address(&params, 0);
     println!("   vault address {}...  ({:?})", &vault_addr[..24], t.elapsed());
 
@@ -157,33 +148,29 @@ async fn vault_e2e() {
     println!("   built in {:?}", t.elapsed());
 
     let t = step("deposit 1 ZEC from faucet into the vault");
-    let pczt = wallet.propose(faucet, &vault_addr, ZEC, None).unwrap();
-    let pczt = prove(pczt, &pk).unwrap();
-    let pczt = sign_with_usk(pczt, &usk).unwrap();
-    let txid = wallet.finish_and_send(&mut client, pczt).await.unwrap();
+    let pczt = faucet.wallet.propose(faucet.account, &vault_addr, ZEC, None).unwrap();
+    let pczt = sign_with_usk(prove(pczt, &pk).unwrap(), faucet.usk.as_ref().unwrap()).unwrap();
+    let txid = faucet.wallet.finish_and_send(&mut client, pczt).await.unwrap();
     println!("   sent {txid} ({:?})", t.elapsed());
     mine(1);
-    wallet.sync(&mut client).await.unwrap();
-    let in_vault = wallet.spendable(vault_account).unwrap();
-    println!("   vault spendable: {} ZEC", in_vault as f64 / ZEC as f64);
+    vault_wallet.sync(&mut client).await.unwrap();
+    let in_vault = vault_wallet.spendable(vault_account).unwrap();
+    println!("   vault spendable: {}", zec(in_vault));
     assert_eq!(in_vault, ZEC);
 
     let t = step("spend 0.5 ZEC out of the vault, signed by seats 1 and 3");
-    let back_to = wallet.next_address(faucet).unwrap();
-    let before = wallet.spendable(faucet).unwrap();
-    let pczt = wallet.propose(vault_account, &back_to, ZEC / 2, None).unwrap();
+    let back_to = faucet.wallet.next_address(faucet.account).unwrap();
+    let pczt = vault_wallet.propose(vault_account, &back_to, ZEC / 2, None).unwrap();
     let pczt = prove(pczt, &pk).unwrap();
     let signers: BTreeMap<_, _> = [1u16, 3].iter().map(|n| (seat(*n), keys[&seat(*n)].clone())).collect();
     let pczt = sign_with_vault(pczt, &vault, &signers).unwrap();
-    let txid = wallet.finish_and_send(&mut client, pczt).await.unwrap();
+    let txid = vault_wallet.finish_and_send(&mut client, pczt).await.unwrap();
     println!("   sent {txid} ({:?})", t.elapsed());
     mine(1);
-    wallet.sync(&mut client).await.unwrap();
+    vault_wallet.sync(&mut client).await.unwrap();
 
-    let vault_left = wallet.spendable(vault_account).unwrap();
-    let faucet_gain = wallet.spendable(faucet).unwrap() as i64 - before as i64;
-    println!("   vault now holds {} ZEC", vault_left as f64 / ZEC as f64);
-    println!("   faucet gained  {} ZEC (plus mining rewards)", faucet_gain as f64 / ZEC as f64);
+    let vault_left = vault_wallet.spendable(vault_account).unwrap();
+    println!("   vault now holds {}", zec(vault_left));
     assert!(vault_left < ZEC / 2, "vault paid out 0.5 ZEC plus the fee");
     println!("\nvault e2e passed: a 2 of 3 FROST signature authorized a real Ironwood spend on chain");
 }
@@ -221,6 +208,55 @@ impl Party {
     }
 }
 
+/// Spendable balance the faucet tops itself up to before a run.
+const FAUCET_FLOOR: u64 = 50 * ZEC;
+
+/// The dev faucet, kept in regtest/faucet/ between runs so that only the
+/// first run on a fresh chain pays for 100 blocks of coinbase maturity.
+///
+/// Zebra pays every mined block to the faucet, so once it exists it keeps
+/// growing on its own. If Zebra's chain was reset (the wallet has synced past
+/// the node's tip) the faucet wallet is thrown away and rebuilt.
+async fn faucet(client: &mut tacit_wallet::GrpcClient) -> Party {
+    let dir = regtest_dir().join("faucet");
+    let db = dir.join("faucet.sqlite");
+    let tip = tacit_regtest::height(tacit_regtest::DEFAULT_RPC).expect("Zebra RPC is not reachable on 18232") as u32;
+
+    let existing = if db.exists() {
+        let wallet = Wallet::open(&db, regtest()).unwrap();
+        match (wallet.synced_height().unwrap(), wallet.accounts().unwrap().first().copied()) {
+            (Some(h), Some(account)) if h <= tip => Some((wallet, account)),
+            _ => {
+                println!("   faucet wallet doesn't match this chain; rebuilding it");
+                drop(wallet);
+                fs::remove_dir_all(&dir).unwrap();
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    let seed = faucet_seed();
+    let mut party = match existing {
+        Some((wallet, account)) => {
+            let usk = UnifiedSpendingKey::from_seed(&regtest(), &seed, AccountId::ZERO).unwrap();
+            Party { wallet, account, usk: Some(usk) }
+        }
+        None => {
+            fs::create_dir_all(&dir).unwrap();
+            Party::new(&dir, "faucet", Some(seed), client).await
+        }
+    };
+    party.sync(client).await;
+    if party.balance() < FAUCET_FLOOR {
+        mine(COINBASE_MATURITY + 2);
+        party.sync(client).await;
+    }
+    assert!(party.balance() >= FAUCET_FLOOR, "faucet should hold matured coinbase by now");
+    party
+}
+
 async fn auction_e2e() {
     use tacit_core::auction::{self, PriceRule, Terms};
     use tacit_core::seal;
@@ -237,9 +273,7 @@ async fn auction_e2e() {
     let pk = ironwood_proving_key();
 
     let t = step("faucet");
-    let mut faucet = Party::new(&data, "faucet", Some(faucet_seed()), &mut client).await;
-    mine(COINBASE_MATURITY + 2);
-    faucet.sync(&mut client).await;
+    let mut faucet = faucet(&mut client).await;
     println!("   faucet spendable: {} ({:?})", zec(faucet.balance()), t.elapsed());
 
     let t = step("seller, three bidders, and the vault, each with their own wallet");

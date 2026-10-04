@@ -10,3 +10,4 @@ regtest/auction/
 regtest/*.log
 spikes/wasm-bench/pkg/
 spikes/wasm-bench/pkg-threads/
+regtest/faucet/

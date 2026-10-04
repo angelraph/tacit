@@ -217,6 +217,16 @@ impl<P: Parameters + Clone + Send + Sync + 'static> Wallet<P> {
         Ok(account.id())
     }
 
+    /// Every account in this wallet, oldest first.
+    pub fn accounts(&self) -> Result<Vec<AccountUuid>, WalletError> {
+        self.db.get_account_ids().map_err(db_err)
+    }
+
+    /// Height of the chain tip this wallet has synced to, if it has synced.
+    pub fn synced_height(&self) -> Result<Option<u32>, WalletError> {
+        Ok(self.db.chain_height().map_err(db_err)?.map(u32::from))
+    }
+
     /// A fresh shielded receiving address for `account`.
     pub fn next_address(&mut self, account: AccountUuid) -> Result<String, WalletError> {
         let (ua, _) = self
