@@ -29,3 +29,4 @@ zcash_address = "0.13"
 tacit-core = { path = "../tacit-core" }
 tacit-regtest = { path = "../tacit-regtest" }
 tacit-coordinator = { path = "../tacit-coordinator" }
+tacit-light = { path = "../tacit-light" }

@@ -42,7 +42,7 @@ pub fn mine_one(rpc: &str) -> Result<u64, String> {
 /// transaction is broadcast the template can still be one built without it.
 /// Wait until the template covers everything in the mempool.
 fn template_with_mempool(rpc: &str) -> Result<Value, String> {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
     loop {
         let mempool = call(rpc, "getrawmempool", json!([]))?;
         let t = call(rpc, "getblocktemplate", json!([]))?;

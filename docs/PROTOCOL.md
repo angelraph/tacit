@@ -111,6 +111,63 @@ refunds, with any remainder from the first.
 The vault pays everything in a single transaction, signed by any two seats.
 Its change output is always zero.
 
+## Escrow
+
+An escrow is a 2 of 3 vault whose seats are, in order, the buyer, the seller
+and an arbiter. Its terms are:
+
+| Field | Meaning |
+|---|---|
+| `network` | `main`, `test` or `regtest` |
+| `vault_ufvk` | the vault's unified full viewing key |
+| `seats` | hex X25519 seat keys of buyer, seller and arbiter |
+| `buyer` | unified address refunds go to |
+| `seller` | unified address payment goes to |
+| `item` | description, at most 256 bytes |
+| `amount` | what the buyer pays in, zatoshi |
+| `created_height` | chain height the vault was created at |
+
+The escrow id is `BLAKE2b-256` with personalization `TacitEscrow___v1` over
+the fields in the order above, with the same encoding as auction terms (each
+seat key is a length-prefixed string).
+
+The vault pays out exactly once, everything it holds, either to `seller` or
+to `buyer`, minus the ZIP 317 fee: 5,000 zatoshi times the larger of 2 and
+the number of notes spent. Like an auction settlement, the payout carries one
+zero-valued change output back to the vault.
+
+Any two seats can sign the payout. An arbiter running unattended cosigns only
+when a party gives up its own claim: the buyer asking to pay the seller, or
+the seller asking to refund the buyer. Every other request is a dispute and
+waits for the arbiter's own decision (`tacit decide <room>`). Before signing,
+any seat checks the transaction pays exactly the amount above to exactly that
+address and spends every note the vault holds.
+
+## Rooms and agents
+
+Seats talk through the coordinator's rooms in sealed envelopes. A room has a
+public `purpose` so that seats running unattended (agents) know what is being
+asked of them:
+
+| Purpose | Meaning |
+|---|---|
+| `dkg` | key generation for a new vault |
+| `settle:<auction id>:<seat>` | seat `<seat>` coordinates the auction's settlement |
+| `escrow:<escrow id>:<seller or buyer>:<seat>` | seat `<seat>` asks to pay the escrow out to that party |
+
+An operator agent settles every auction on its vaults once the closing
+beacon is out and bidding has ended, asking the arbiter seat to cosign. Every
+agent recomputes what the rules require before signing anything and refuses
+any other transaction.
+
+## Chain gateway
+
+Browsers can't speak gRPC, so a coordinator can also relay a light wallet
+server's public data as JSON: chain info, tree states, compact blocks trimmed
+to their Ironwood actions, raw transactions, and broadcasting. Browsers
+trial-decrypt blocks themselves; the gateway never receives a key, an address
+or a note.
+
 ## Verifying
 
 `verify` takes nothing but the terms and the beacon. It imports the audit key

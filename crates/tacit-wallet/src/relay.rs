@@ -108,9 +108,49 @@ impl Relay {
 
     /// Opens a room for these seats and returns its id.
     pub fn open_room(&self, seats: &[SeatPub]) -> Result<String, RelayError> {
+        self.open_room_for(seats, "")
+    }
+
+    /// Opens a room tagged with what it's for (`dkg`, `settle:<auction>:<seat>`,
+    /// `escrow:<escrow>:<payee>:<seat>`), so unattended seats can act on it.
+    pub fn open_room_for(&self, seats: &[SeatPub], purpose: &str) -> Result<String, RelayError> {
         let seats: Vec<String> = seats.iter().map(hex::encode).collect();
-        let room = self.post("/v1/rooms", &json!({ "seats": seats }))?;
+        let room = self.post("/v1/rooms", &json!({ "seats": seats, "purpose": purpose }))?;
         room["id"].as_str().map(str::to_string).ok_or_else(|| RelayError::Http(format!("bad room reply: {room}")))
+    }
+
+    /// Rooms `seat` sits in that were opened at or after `since` (unix
+    /// seconds): (id, seats, purpose, created).
+    pub fn rooms_for(&self, seat: &SeatPub, since: i64) -> Result<Vec<(String, Vec<SeatPub>, String, i64)>, RelayError> {
+        let list = self.get(&format!("/v1/rooms?seat={}&since={since}", hex::encode(seat)))?;
+        let list = list.as_array().ok_or_else(|| RelayError::Http(format!("bad rooms reply: {list}")))?;
+        Ok(list
+            .iter()
+            .filter_map(|r| {
+                let seats = r["seats"]
+                    .as_array()?
+                    .iter()
+                    .map(|s| hex::decode(s.as_str()?).ok()?.try_into().ok())
+                    .collect::<Option<Vec<SeatPub>>>()?;
+                Some((
+                    r["id"].as_str()?.to_string(),
+                    seats,
+                    r["purpose"].as_str().unwrap_or_default().to_string(),
+                    r["created"].as_i64().unwrap_or(0),
+                ))
+            })
+            .collect())
+    }
+
+    /// Tells the coordinator this agent is online.
+    pub fn announce(&self, seat: &SeatPub, role: &str, name: &str) -> Result<(), RelayError> {
+        self.post("/v1/agents", &json!({ "seat": hex::encode(seat), "role": role, "name": name }))?;
+        Ok(())
+    }
+
+    /// Published escrow terms, as JSON.
+    pub fn escrow(&self, id: &str) -> Result<Value, RelayError> {
+        Ok(self.get(&format!("/v1/escrows/{id}"))?["terms"].take())
     }
 
     pub fn send(&self, room: &str, from: &SeatPub, out: &[Outgoing]) -> Result<(), RelayError> {

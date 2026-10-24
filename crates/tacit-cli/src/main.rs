@@ -5,6 +5,7 @@
 //! Vault seats only talk to each other through a coordinator, and only in
 //! sealed envelopes; the coordinator can't read or forge anything.
 
+mod agent;
 mod home;
 mod market;
 mod net;
@@ -66,6 +67,18 @@ enum Cmd {
     /// Sealed-bid auctions.
     #[command(subcommand)]
     Auction(market::AuctionCmd),
+    /// Run as an always-online operator or arbiter seat: join key generation,
+    /// settle auctions when they unseal, and cosign what the rules allow.
+    Agent {
+        #[arg(long, value_enum)]
+        role: agent::Role,
+        /// Name shown to sellers choosing seats.
+        #[arg(long, default_value = "Tacit agent")]
+        name: String,
+    },
+    /// As an arbiter, rule for the requester of an escrow dispute by
+    /// cosigning the payout they asked for in `room`.
+    Decide { room: String },
     /// Seal a bid and deposit the bond for an auction.
     Bid {
         auction: String,
@@ -195,6 +208,8 @@ async fn run(cli: Cli) -> Result<()> {
         Cmd::Vault(c) => vault::run(&home, c).await,
         Cmd::Auction(c) => market::run(&home, c).await,
         Cmd::Bid { auction, amount } => market::bid(&home, &auction, &amount).await,
+        Cmd::Agent { role, name } => agent::run(&home, role, name).await,
+        Cmd::Decide { room } => agent::decide(&home, &room).await,
     }
 }
 

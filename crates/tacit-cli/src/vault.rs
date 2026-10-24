@@ -58,7 +58,7 @@ pub async fn run(home: &Home, cmd: VaultCmd) -> Result<()> {
             if !seats.contains(&me) {
                 bail!("your own seat isn't in the list; add `me` where you sit");
             }
-            let room = blocking(home.relay(), move |r| Ok(r.open_room(&seats)?)).await?;
+            let room = blocking(home.relay(), move |r| Ok(r.open_room_for(&seats, "dkg")?)).await?;
             println!("room {room}");
             println!("the other two seats run:  tacit vault join <name> {room}");
             keygen(home, &name, &room).await
@@ -91,7 +91,7 @@ pub async fn run(home: &Home, cmd: VaultCmd) -> Result<()> {
 }
 
 /// Runs this seat's side of key generation and saves the result.
-async fn keygen(home: &Home, name: &str, room: &str) -> Result<()> {
+pub async fn keygen(home: &Home, name: &str, room: &str) -> Result<()> {
     let key = home.seat_key()?;
     let room_id = room.to_string();
     let seats = blocking(home.relay(), move |r| Ok(r.room(&room_id)?)).await?;

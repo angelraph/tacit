@@ -3,5 +3,6 @@
 pub mod auction;
 pub mod beacon;
 pub mod envelope;
+pub mod escrow;
 pub mod memo;
 pub mod seal;

@@ -179,6 +179,103 @@ fn print_outcome(outcome: &auction::Outcome, payments: &[(String, u64)]) {
     }
 }
 
+/// Computes, proves and coordinates the settlement of auction `id` from our
+/// seat in `vault`, cosigned by seat `with`. Returns the broadcast txid.
+pub async fn settle_auction(home: &Home, id: &str, vault: &str, with: u16) -> Result<String> {
+    let terms = fetch_terms(home, id).await?;
+    let v = our_vault(home, vault, &terms)?;
+    if with == v.seat || !(1..=3).contains(&with) {
+        bail!("--with must be one of the other two seats");
+    }
+    let mut client = home.client().await?;
+    let (mut wallet, account, outcome, payments, n) = expected_settlement(home, &v, &terms, &mut client).await?;
+    print_outcome(&outcome, &payments);
+
+    let to_pay: Vec<_> = payments.iter().map(|(to, a)| (to.clone(), *a, None)).collect();
+    let pczt = wallet.propose_payments(account, &to_pay)?;
+    println!("proving the settlement...");
+    let pczt = prove(pczt, &ironwood_proving_key())?;
+    check_settlement(&home.params, &pczt, &payments, n).map_err(|e| anyhow!("our own settlement fails the check: {e}"))?;
+
+    let seats = v.seats.clone();
+    let purpose = format!("settle:{id}:{}", v.seat);
+    let room = blocking(home.relay(), move |r| Ok(r.open_room_for(&seats, &purpose)?)).await?;
+    println!("\nsigning room {room}");
+    println!("seat {with} runs:  tacit auction cosign {id} --vault <name> --room {room} --from {}", v.seat);
+    let (key, seats, vault_k, kp, me) =
+        (home.seat_key()?.to_bytes(), v.seats.clone(), v.vault.clone(), v.key_package.clone(), v.seat);
+    let signed = blocking(home.relay(), move |r| {
+        Ok(relay::run_coordinator(&r, SeatKey::from_bytes(key), &room, seats, vault_k, pczt, &[me, with], Some(kp), SEAT_TIMEOUT)?)
+    })
+    .await?;
+    let txid = wallet.finish_and_send(&mut client, signed).await?;
+    Ok(txid.to_string())
+}
+
+/// Cosigns a settlement another seat coordinates in `room`, after checking
+/// it pays exactly what the rules require. `yes` skips the prompt.
+pub async fn cosign_auction(home: &Home, id: &str, vault: &str, room: &str, from: u16, yes: bool) -> Result<()> {
+    let terms = fetch_terms(home, id).await?;
+    let v = our_vault(home, vault, &terms)?;
+    if !(1..=3).contains(&from) || from == v.seat {
+        bail!("--from must be one of the other two seats");
+    }
+    let mut client = home.client().await?;
+    let (_, _, outcome, payments, n) = expected_settlement(home, &v, &terms, &mut client).await?;
+    println!("the rules say this auction settles as:");
+    print_outcome(&outcome, &payments);
+    println!("waiting for seat {from} to send the settlement...");
+
+    let (key, seats, kp, params) = (home.seat_key()?.to_bytes(), v.seats.clone(), v.key_package.clone(), home.params.clone());
+    let coordinator = v.seats[from as usize - 1];
+    let room = room.to_string();
+    blocking(home.relay(), move |r| {
+        let approve = |p: &pczt::Pczt| match check_settlement(&params, p, &payments, n) {
+            Ok(()) => {
+                println!("the settlement pays exactly that.");
+                yes || confirm("sign it?")
+            }
+            Err(e) => {
+                println!("refusing to sign: {e}");
+                false
+            }
+        };
+        Ok(relay::run_signer(&r, SeatKey::from_bytes(key), &room, seats, coordinator, kp, approve, SEAT_TIMEOUT)?)
+    })
+    .await
+}
+
+/// The auction's terms if it is backed by one of our vaults: (vault name, terms).
+pub async fn auctions_on_our_vaults(home: &Home) -> Result<Vec<(String, String, Terms)>> {
+    let list = blocking(home.relay(), |r| Ok(r.auctions()?)).await?;
+    let mut ours = Vec::new();
+    let vaults: Vec<(String, String)> = home
+        .vault_names()?
+        .into_iter()
+        .filter_map(|n| home.load_vault(&n).ok().map(|v| (n, v.vault.ufvk().encode(&home.params))))
+        .collect();
+    for (id, json) in list {
+        let Ok(t) = serde_json::from_value::<Terms>(json) else { continue };
+        if t.network != home.net.to_string() || hex::encode(t.id()) != id {
+            continue;
+        }
+        if let Some((name, _)) = vaults.iter().find(|(_, ufvk)| *ufvk == t.vault_ufvk) {
+            ours.push((id, name.clone(), t));
+        }
+    }
+    Ok(ours)
+}
+
+/// Whether an auction's bids have unsealed and bidding is over, so it can
+/// be settled now.
+pub async fn ready_to_settle(home: &Home, terms: &Terms) -> Result<bool> {
+    if now() < seal::round_time(terms.close_round) {
+        return Ok(false);
+    }
+    let mut client = home.client().await?;
+    Ok(tip(&mut client).await? > terms.bids_until_height)
+}
+
 pub async fn run(home: &Home, cmd: AuctionCmd) -> Result<()> {
     match cmd {
         AuctionCmd::Create { vault, item, reserve, bond, bid_blocks, close_in, first_price } => {
@@ -251,73 +348,12 @@ pub async fn run(home: &Home, cmd: AuctionCmd) -> Result<()> {
             Ok(())
         }
         AuctionCmd::Settle { id, vault, with } => {
-            let terms = fetch_terms(home, &id).await?;
-            let v = our_vault(home, &vault, &terms)?;
-            if with == v.seat || !(1..=3).contains(&with) {
-                bail!("--with must be one of the other two seats");
-            }
-            let mut client = home.client().await?;
-            let (mut wallet, account, outcome, payments, n) = expected_settlement(home, &v, &terms, &mut client).await?;
-            print_outcome(&outcome, &payments);
-
-            let to_pay: Vec<_> = payments.iter().map(|(to, a)| (to.clone(), *a, None)).collect();
-            let pczt = wallet.propose_payments(account, &to_pay)?;
-            println!("proving the settlement...");
-            let pczt = prove(pczt, &ironwood_proving_key())?;
-            check_settlement(&home.params, &pczt, &payments, n).map_err(|e| anyhow!("our own settlement fails the check: {e}"))?;
-
-            let seats = v.seats.clone();
-            let room = blocking(home.relay(), move |r| Ok(r.open_room(&seats)?)).await?;
-            println!("\nsigning room {room}");
-            println!("seat {with} runs:  tacit auction cosign {id} --vault <name> --room {room} --from {}", v.seat);
-            let (key, seats, vault_k, kp, me) =
-                (home.seat_key()?.to_bytes(), v.seats.clone(), v.vault.clone(), v.key_package.clone(), v.seat);
-            let signed = blocking(home.relay(), move |r| {
-                Ok(relay::run_coordinator(
-                    &r,
-                    SeatKey::from_bytes(key),
-                    &room,
-                    seats,
-                    vault_k,
-                    pczt,
-                    &[me, with],
-                    Some(kp),
-                    SEAT_TIMEOUT,
-                )?)
-            })
-            .await?;
-            let txid = wallet.finish_and_send(&mut client, signed).await?;
+            let txid = settle_auction(home, &id, &vault, with).await?;
             println!("settled: {txid}");
             Ok(())
         }
         AuctionCmd::Cosign { id, vault, room, from, yes } => {
-            let terms = fetch_terms(home, &id).await?;
-            let v = our_vault(home, &vault, &terms)?;
-            if !(1..=3).contains(&from) || from == v.seat {
-                bail!("--from must be one of the other two seats");
-            }
-            let mut client = home.client().await?;
-            let (_, _, outcome, payments, n) = expected_settlement(home, &v, &terms, &mut client).await?;
-            println!("the rules say this auction settles as:");
-            print_outcome(&outcome, &payments);
-            println!("waiting for seat {from} to send the settlement...");
-
-            let (key, seats, kp, params) = (home.seat_key()?.to_bytes(), v.seats.clone(), v.key_package.clone(), home.params.clone());
-            let coordinator = v.seats[from as usize - 1];
-            blocking(home.relay(), move |r| {
-                let approve = |p: &pczt::Pczt| match check_settlement(&params, p, &payments, n) {
-                    Ok(()) => {
-                        println!("the settlement pays exactly that.");
-                        yes || confirm("sign it?")
-                    }
-                    Err(e) => {
-                        println!("refusing to sign: {e}");
-                        false
-                    }
-                };
-                Ok(relay::run_signer(&r, SeatKey::from_bytes(key), &room, seats, coordinator, kp, approve, SEAT_TIMEOUT)?)
-            })
-            .await?;
+            cosign_auction(home, &id, &vault, &room, from, yes).await?;
             println!("signed; seat {from} broadcasts the settlement");
             Ok(())
         }

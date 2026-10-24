@@ -18,11 +18,19 @@
 //!   tacit-dev mine <n>
 //!       Mines n regtest blocks.
 //!
+//!   tacit-dev mine-every <seconds>
+//!       Mines a block every few seconds, a block clock for the web app.
+//!
 //!   tacit-dev auction-e2e
 //!       A full sealed-bid auction: three bidders deposit identical bonds
 //!       with timelocked bids, the drand round opens them, the vault settles
 //!       in one transaction signed by seller and operator, and an auditor
 //!       holding nothing but the published terms verifies the result.
+//!
+//!   tacit-dev light-e2e
+//!       The web app's wallet code (tacit-light) run natively through the
+//!       coordinator's JSON chain gateway: sync, a sealed bid, an audit from
+//!       the terms, and a FROST-signed payout of a whole vault.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -471,6 +479,140 @@ async fn auction_e2e() {
     println!("\nauction e2e passed: sealed bids, public clearing price, no identities, settlement verified by an outsider");
 }
 
+/// The browser's code paths (tacit-light), run natively against regtest
+/// through the coordinator's JSON chain gateway, exactly as the web app
+/// drives them: sync, a sealed bid, an audit from the terms, and a whole-vault
+/// payout signed 2 of 3 with FROST (what an escrow release does).
+async fn light_e2e() {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    use tacit_core::auction::{PriceRule, Terms};
+    use tacit_core::seal;
+    use tacit_light::chain::{Block, Info, RawTx, Tree};
+    use tacit_light::{audit::Audit, build, keys, Account, Net, Scanner};
+
+    let params = regtest();
+    let mut client = connect(GRPC).await.expect("Zebra's lightwalletd endpoint is not reachable on 9067");
+    let state = tacit_coordinator::AppState::in_memory().unwrap().with_chain(GRPC).unwrap();
+    let url = tacit_coordinator::spawn("127.0.0.1:0", state).await.unwrap();
+    let http: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(60))).build().into();
+    let get = |path: String| -> String {
+        let http = http.clone();
+        let url = url.clone();
+        std::thread::spawn(move || http.get(&format!("{url}{path}")).call().unwrap().body_mut().read_to_string().unwrap())
+            .join()
+            .unwrap()
+    };
+    let broadcast = |data: Vec<u8>| {
+        let http = http.clone();
+        let url = url.clone();
+        std::thread::spawn(move || {
+            let body = serde_json::json!({ "data": hex::encode(data) }).to_string();
+            let mut res = http
+                .post(&format!("{url}/v1/chain/tx"))
+                .config()
+                .http_status_as_error(false)
+                .build()
+                .header("content-type", "application/json")
+                .send(body)
+                .unwrap();
+            let text = res.body_mut().read_to_string().unwrap();
+            assert!(res.status().is_success(), "broadcast rejected: {text}");
+        })
+        .join()
+        .unwrap()
+    };
+    let tip = || -> u64 { serde_json::from_str::<Info>(&get("/v1/chain/info".into())).unwrap().tip };
+    let tree = |h: u64| -> Tree { serde_json::from_str(&get(format!("/v1/chain/tree/{h}"))).unwrap() };
+    let catch_up = |s: &mut Scanner| {
+        let t = tip();
+        let mut h = s.height() as u64;
+        while h < t {
+            let to = t.min(h + 400);
+            let blocks: Vec<Block> = serde_json::from_str(&get(format!("/v1/chain/blocks?from={}&to={to}", h + 1))).unwrap();
+            s.scan(&blocks).unwrap();
+            h = to;
+        }
+    };
+    let pk = build::proving_key();
+
+    let t = step("faucet, and a light wallet funded through the gateway");
+    let mut faucet = faucet(&mut client).await;
+    let mut seed = [0u8; 32];
+    OsRng.fill_bytes(&mut seed);
+    let account = Account::from_seed(Net::Regtest, &seed).unwrap();
+    let mut wallet = Scanner::new(Net::Regtest, account.fvk().clone(), &tree(tip())).unwrap();
+    let pczt = faucet.wallet.propose(faucet.account, &account.unified_address(0), 2 * ZEC, None).unwrap();
+    let pczt = sign_with_usk(prove(pczt, &ironwood_proving_key()).unwrap(), faucet.usk.as_ref().unwrap()).unwrap();
+    faucet.wallet.finish_and_send(&mut client, pczt).await.unwrap();
+    mine(1);
+    catch_up(&mut wallet);
+    assert_eq!(wallet.spendable(), 2 * ZEC);
+    println!("   light wallet sees {} ({:?})", zec(wallet.spendable()), t.elapsed());
+
+    let t = step("a sealed bid built, proved and signed by the light wallet");
+    let seats = vault_over_coordinator().await;
+    let vault = seats.vault();
+    let created = tip() as u32;
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+    let terms = Terms {
+        network: "regtest".into(),
+        vault_ufvk: vault.ufvk().encode(&params),
+        seller: faucet.wallet.next_address(faucet.account).unwrap(),
+        item: "light wallet test lot".into(),
+        created_height: created,
+        reserve: ZEC / 10,
+        bond: ZEC,
+        bids_until_height: created + 5,
+        close_round: seal::round_at(now + 600),
+        rule: PriceRule::SecondPrice,
+    };
+    assert_eq!(
+        keys::encode_fvk(Net::Regtest, vault.fvk()),
+        terms.vault_ufvk,
+        "the light wallet must encode viewing keys exactly like zcash_keys"
+    );
+    let built = build::bid(&account, &wallet, &pk, &terms, 42 * ZEC / 100, 1).unwrap();
+    broadcast(built.data.clone());
+    wallet.mark_pending(&built.spent, &built.txid);
+    mine(1);
+    catch_up(&mut wallet);
+    assert_eq!(wallet.spendable(), 2 * ZEC - ZEC - built.fee);
+    println!("   bid {} mined; wallet now {} ({:?})", &built.txid[..16], zec(wallet.spendable()), t.elapsed());
+
+    let t = step("audit from the published terms, in the light client");
+    let mut audit = Audit::new(terms.clone(), &tree(created as u64)).unwrap();
+    catch_up(audit.scanner());
+    for txid in audit.wanted() {
+        let raw: RawTx = serde_json::from_str(&get(format!("/v1/chain/tx/{txid}"))).unwrap();
+        audit.add_tx(&txid, &raw).unwrap();
+    }
+    let report = audit.report(None).unwrap();
+    assert_eq!(report.deposits.len(), 1);
+    assert!(report.deposits[0].sealed_bid && report.memos_complete);
+    assert_eq!(report.vault, vault.encode_address(&params, 0));
+    println!("   audit sees 1 sealed bid of {} ({:?})", zec(report.deposits[0].value), t.elapsed());
+
+    let t = step("whole-vault payout built by the light client, signed 2 of 3 with FROST");
+    let mut vault_scan = Scanner::new(Net::Regtest, vault.fvk().clone(), &tree(created as u64)).unwrap();
+    catch_up(&mut vault_scan);
+    let payee = Account::from_seed(Net::Regtest, &[9u8; 32]).unwrap();
+    let (pczt, amount) = build::vault_payout(&vault_scan, &pk, payee.address(0)).unwrap();
+    assert_eq!(amount, ZEC - tacit_core::escrow::fee(1));
+    let check = tacit_wallet::auction::check_settlement(&params, &pczt, &[(payee.unified_address(0), amount)], 1);
+    assert!(check.is_ok(), "a cosigner must accept the light client's payout: {check:?}");
+    let signed = sign_over_coordinator(&seats, pczt, 1, 3).await;
+    let tx = build::extract(signed).unwrap();
+    broadcast(tx.data);
+    mine(1);
+    let mut payee_scan = Scanner::new(Net::Regtest, payee.fvk().clone(), &tree(created as u64)).unwrap();
+    catch_up(&mut payee_scan);
+    catch_up(&mut vault_scan);
+    assert_eq!(payee_scan.balance(), amount);
+    assert_eq!(vault_scan.balance(), 0);
+    println!("   paid {} out of the vault in {} ({:?})", zec(amount), &tx.txid[..16], t.elapsed());
+    println!("\nlight e2e passed: the browser wallet syncs, bids, audits and pays out of a FROST vault");
+}
+
 #[tokio::main]
 async fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -478,7 +620,20 @@ async fn main() {
         Some("init") => init(args.get(2).map(String::as_str).unwrap_or("/tmp/tacit-zebra")),
         Some("vault-e2e") => vault_e2e().await,
         Some("auction-e2e") => auction_e2e().await,
+        Some("light-e2e") => light_e2e().await,
         Some("mine") => mine(args.get(2).and_then(|n| n.parse().ok()).unwrap_or(1)),
+        Some("mine-every") => {
+            // A steady block clock for trying the web app on regtest.
+            let secs = args.get(2).and_then(|n| n.parse().ok()).unwrap_or(20u64);
+            println!("mining a block every {secs} s; ctrl-c stops");
+            loop {
+                std::thread::sleep(Duration::from_secs(secs));
+                match tacit_regtest::mine_one(tacit_regtest::DEFAULT_RPC) {
+                    Ok(h) => println!("block {h}"),
+                    Err(e) => eprintln!("mining failed: {e}"),
+                }
+            }
+        }
         Some("fund") => {
             let (Some(to), Some(zat)) = (args.get(2), args.get(3).and_then(|z| z.parse::<u64>().ok())) else {
                 eprintln!("usage: tacit-dev fund <address> <zatoshi>");
@@ -487,7 +642,7 @@ async fn main() {
             fund(to, zat).await
         }
         _ => {
-            eprintln!("usage: tacit-dev init <zebra-state-dir> | vault-e2e | auction-e2e | fund <address> <zatoshi> | mine <n>");
+            eprintln!("usage: tacit-dev init <zebra-state-dir> | vault-e2e | auction-e2e | light-e2e | fund <address> <zatoshi> | mine <n> | mine-every <seconds>");
             std::process::exit(2);
         }
     }

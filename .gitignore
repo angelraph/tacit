@@ -11,3 +11,6 @@ regtest/*.log
 spikes/wasm-bench/pkg/
 spikes/wasm-bench/pkg-threads/
 regtest/faucet/
+web/pkg/
+web/pkg-threads/
+web/.vercel/

@@ -1,7 +1,10 @@
 //! Tacit in the browser.
 //!
-//! For now this exposes the Ironwood prover so we can measure how long a real
-//! proof takes in a browser before building the web wallet on top of it.
+//! [`app`] is what the web app uses: a wallet, sealed bids and auction audits.
+//! The prover benchmark below is what we measured browser proving with.
+
+pub mod app;
+pub mod seat;
 
 use orchard::builder::{Builder, BundleType};
 use orchard::bundle::{Authorized, Bundle, BundleVersion};

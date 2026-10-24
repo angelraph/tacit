@@ -1,0 +1,28 @@
+[package]
+name = "tacit-light"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "A small Ironwood light wallet that runs the same natively and in the browser"
+
+[dependencies]
+tacit-core = { path = "../tacit-core", features = ["serde"] }
+orchard = { version = "0.15", default-features = false, features = ["circuit", "std"] }
+zcash_primitives = { version = "0.30.1", default-features = false, features = ["std", "circuits"] }
+zcash_protocol = { version = "0.10", features = ["local-consensus"] }
+zcash_address = "0.13"
+zcash_note_encryption = "0.4"
+pczt = { version = "0.9.3", default-features = false, features = ["orchard", "prover", "io-finalizer", "signer", "tx-extractor", "zcp-builder"] }
+incrementalmerkletree = { version = "0.8", features = ["legacy-api"] }
+zip32 = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+hex = "0.4"
+rand_core = { version = "0.6", features = ["getrandom"] }
+blake2b_simd = "1"
+thiserror = "2"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.2", features = ["js"] }
+getrandom03 = { package = "getrandom", version = "0.3", features = ["wasm_js"] }

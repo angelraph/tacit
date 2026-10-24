@@ -2,13 +2,10 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "wasm-bench",
+      "name": "tacit-web",
       "runtimeExecutable": "python",
-      "runtimeArgs": [
-        "spikes/wasm-bench/serve.py",
-        "8765"
-      ],
-      "port": 8765
+      "runtimeArgs": ["web/serve.py", "8770"],
+      "port": 8770
     }
   ]
 }
