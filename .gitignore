@@ -14,3 +14,4 @@ regtest/faucet/
 web/pkg/
 web/pkg-threads/
 web/.vercel/
+deploy/out/

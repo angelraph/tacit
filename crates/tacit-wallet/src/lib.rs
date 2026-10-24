@@ -132,10 +132,18 @@ pub fn regtest() -> LocalNetwork {
     }
 }
 
+/// Connects to a lightwalletd-compatible server, over TLS for `https://`
+/// URLs (public servers such as testnet.zec.rocks).
 pub async fn connect(url: &str) -> Result<CompactTxStreamerClient<Channel>, WalletError> {
-    CompactTxStreamerClient::connect(url.to_string())
-        .await
-        .map_err(|e| WalletError::Grpc(e.to_string()))
+    let grpc = |e: tonic::transport::Error| WalletError::Grpc(e.to_string());
+    let mut endpoint = tonic::transport::Endpoint::from_shared(url.to_string()).map_err(grpc)?;
+    if url.starts_with("https://") {
+        endpoint = endpoint
+            .tls_config(tonic::transport::ClientTlsConfig::new().with_webpki_roots())
+            .map_err(grpc)?;
+    }
+    let channel = endpoint.connect().await.map_err(grpc)?;
+    Ok(CompactTxStreamerClient::new(channel).max_decoding_message_size(64 << 20))
 }
 
 /// Proving key for the post NU6.3 circuit Ironwood uses. Building it takes a

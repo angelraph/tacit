@@ -8,6 +8,10 @@ import {
 import { renderSell } from "./sell.js";
 import { renderEscrow } from "./escrow.js";
 import { renderFund } from "./fund.js";
+import { renderLanding } from "./landing.js";
+import { renderFaq, renderAgents, renderTerms, gate } from "./pages.js";
+import { mountTicker, onPrices, prices, zecUsd, usd } from "./prices.js";
+import { reveals, glowCards, scramble } from "./motion.js";
 
 // Zcash targets 75 s blocks; a regtest chain runs at whatever pace it is
 // mined, so the app measures the recent average instead of assuming.
@@ -224,16 +228,24 @@ export async function syncWallet(quiet) {
 // ---------- routing ----------
 
 const routes = [
-  [/^\/?$/, renderMarket, "market"],
+  [/^\/?$/, () => renderLanding(ctx), "home"],
+  [/^\/market$/, renderMarket, "market"],
   [/^\/auction\/([0-9a-f]{64})$/, renderAuction, "market"],
   [/^\/sell$/, (m) => renderSell(m, ctx), "sell"],
   [/^\/escrow(?:\/(.*))?$/, (m) => renderEscrow(m, ctx), "escrow"],
   [/^\/wallet$/, renderWallet, "wallet"],
   [/^\/fund$/, (m) => renderFund(m, ctx), "wallet"],
-  [/^\/how$/, renderHow, "how"],
+  [/^\/how$/, renderHow, "explore"],
+  [/^\/faq$/, renderFaq, "explore"],
+  [/^\/agents$/, () => renderAgents(ctx), "explore"],
+  [/^\/terms$/, renderTerms, "explore"],
 ];
 
+// Pages that act with money show the risk notice once first.
+const GATED = new Set(["market", "sell", "escrow", "wallet"]);
+
 let renderToken = 0;
+let lastPath = null;
 let ticker = null;
 
 export async function route() {
@@ -244,7 +256,11 @@ export async function route() {
     const m = path.match(re);
     if (!m) continue;
     document.querySelectorAll("nav a").forEach((a) => a.classList.toggle("active", a.dataset.route === tab));
-    if (!S.loaded && tab !== "how" && path !== "/") {
+    document.body.classList.remove("menu-open", "mega-open");
+    view.className = "";
+    if (GATED.has(tab)) await gate(ctx);
+    if (!current(token)) return;
+    if (!S.loaded && tab !== "explore" && tab !== "home") {
       view.innerHTML = `<div class="panel" style="max-width:460px;margin:40px auto"><h2>Loading Tacit</h2><p class="muted">Starting the shielded wallet and the Ironwood prover in your browser.</p><div class="progress spin"><i></i></div></div>`;
     }
     try {
@@ -252,10 +268,13 @@ export async function route() {
     } catch (e) {
       if (token === renderToken) view.innerHTML = `<div class="panel"><h2>Something went wrong</h2><p class="muted">${esc(e.message)}</p></div>`;
     }
-    window.scrollTo(0, 0);
+    if (path !== lastPath) window.scrollTo(0, 0);
+    lastPath = path;
+    reveals(view);
+    glowCards(view);
     return;
   }
-  view.innerHTML = `<div class="empty"><h2>Not found</h2><a href="#/">Back to the market</a></div>`;
+  view.innerHTML = `<div class="empty"><h2>Not found</h2><a href="#/">Back home</a></div>`;
 }
 
 export const current = (token) => token === renderToken;
@@ -269,7 +288,30 @@ const ctx = {
   S, call, api, modal, busy, toast, esc, h, zec, parseZec, short, ago, copy, unit, netName,
   storedWallet, saveScan, syncWallet, route, current, every, needWallet, phase, blockSecs: () => BLOCK_SECS,
   loadSeats, saveSeats, nextRefundIndex, prove, proveWith, warmProver, refreshChain: () => refreshChain(), roundTime,
+  usdPill,
 };
+
+/** A title with its last words dimmed, like Morpho's vault pages. */
+function titleSplit(text) {
+  const words = esc(text).split(" ");
+  if (words.length < 3) return words.join(" ");
+  const cut = Math.max(1, words.length - 2);
+  return `${words.slice(0, cut).join(" ")} <span class="dim">${words.slice(cut).join(" ")}</span>`;
+}
+
+/** Dims the fractional or unit part of a figure: 0.55 → 0<i>.55</i>. */
+function dimUnit(s) {
+  const m = String(s).match(/^([\d,]+)(.*)$/);
+  return m && m[2] ? `${m[1]}<i>${esc(m[2])}</i>` : esc(s);
+}
+
+/** A grey pill with the USD value of an amount in zatoshi. Testnet coins have
+ * no market value, so it only shows on mainnet. */
+export function usdPill(zat) {
+  const p = zecUsd();
+  if (!p || S.net !== "main") return "";
+  return `<span class="usd-pill">${usd((zat / 1e8) * p)}</span>`;
+}
 
 // ---------- auctions ----------
 
@@ -293,63 +335,93 @@ async function loadAuctions() {
   return list.filter((a) => a.terms.network === S.net || !S.net);
 }
 
-function auctionCard(a) {
+const FILTERS = [
+  ["all", "All"],
+  ["bidding", "Bidding open"],
+  ["sealed", "Sealed"],
+  ["open", "Unsealed"],
+];
+
+function marketRow(a) {
   const t = a.terms;
   const p = phase(t, S.info && S.info.tip);
-  const when =
-    p.key === "bidding" ? `closes in ~${ago(p.secs)}` : p.key === "sealed" ? `unseals in ${ago(p.secs)}` : "ready to settle";
-  return `
-    <a class="card" href="#/auction/${a.id}">
-      <div class="row between"><span class="badge ${p.key}">${p.label}</span><span class="faint mono">${a.id.slice(0, 8)}</span></div>
-      <h3>${esc(t.item)}</h3>
-      <div class="figures">
-        <div><span>Reserve</span><b>${zec(t.reserve)} ${unit()}</b></div>
-        <div><span>Bond</span><b>${zec(t.bond)} ${unit()}</b></div>
-      </div>
-      <div class="meta"><span>${t.rule === "first_price" || t.rule === "FirstPrice" ? "First price" : "Second price"}</span><span>${when}</span></div>
-    </a>`;
+  const when = p.key === "bidding" ? `~${ago(p.secs)}` : p.key === "sealed" ? `opens in ${ago(p.secs)}` : "now";
+  const rule = t.rule === "first_price" || t.rule === "FirstPrice" ? "First price" : "Second price";
+  return `<tr data-phase="${p.key}" data-item="${esc(t.item.toLowerCase())}" onclick="location.hash='#/auction/${a.id}'">
+    <td><div class="lot"><span class="lot-icon">${esc(t.item.trim()[0] || "T").toUpperCase()}</span><div><b>${esc(t.item)}</b><span class="sub mono">${a.id.slice(0, 12)}</span></div></div></td>
+    <td class="num">${zec(t.bond)} ${unit()}<br>${usdPill(t.bond)}</td>
+    <td class="num hide-sm">${zec(t.reserve)} ${unit()}<br>${usdPill(t.reserve)}</td>
+    <td><span class="badge ${p.key}">${p.label}</span></td>
+    <td class="hide-sm">${rule}</td>
+    <td class="num">${when}</td>
+  </tr>`;
 }
 
 async function renderMarket(_, token) {
   view.innerHTML = `
-    <section class="hero">
-      <div>
-        <span class="eyebrow">Sealed markets on Zcash</span>
-        <h1>The price is public. <span>The bidders aren't.</span></h1>
-        <p class="lede">Tacit runs sealed-bid auctions on Zcash's shielded pool. Your bid is time-locked, so nobody can read it before the auction closes, not even the seller. When it does close, anyone can audit the result without learning who bid.</p>
-        <div class="row" style="margin-top:22px">
-          <a class="btn primary" href="#/wallet">Open your wallet</a>
-          <a class="btn" href="#/sell">Sell something</a>
-          <a class="btn ghost" href="#/how">How it works →</a>
-        </div>
-      </div>
-      <div class="pillars">
-        <div class="pillar"><i>⏳</i><div><b>Time-locked bids</b><span>Sealed to a future drand round. No one can peek early, and no bidder can refuse to reveal.</span></div></div>
-        <div class="pillar"><i>⅔</i><div><b>No single custodian</b><span>Bonds sit in a 2-of-3 FROST vault. Seller, operator and arbiter each hold a share of the key, and no one ever holds all of it.</span></div></div>
-        <div class="pillar"><i>✓</i><div><b>Anyone can audit</b><span>The vault's viewing key is public. Rebuild the settlement in this tab and check every payment.</span></div></div>
-      </div>
-    </section>
-    <div class="row between" style="margin-bottom:14px">
-      <h2 style="margin:0">Live auctions</h2>
-      <span class="faint" id="count"></span>
+    <div class="row between page-head" style="align-items:flex-end">
+      <div><span class="eyebrow">Market</span><h1 id="mk-title">Sealed auctions</h1><p>Every bid here is locked until its drand round. Bonds are identical, so the chain shows nothing about who bids or how much.</p></div>
+      <span class="total-pill">Bonds in sealed auctions <b id="mk-total">–</b></span>
     </div>
-    <div id="list" class="grid cols-3"><div class="panel"><div class="progress spin"><i></i></div></div></div>`;
+    <div class="headline-stats">
+      <div><span>Live auctions</span><b id="mk-live">–</b></div>
+      <div><span>Bidding now</span><b id="mk-bidding">–</b></div>
+      <div><span>Agents online</span><b id="mk-agents">–</b></div>
+      <div><span>ZEC price</span><b id="mk-zec">–</b></div>
+    </div>
+    <div class="table-card">
+      <div class="table-tools">
+        <div class="chips">${FILTERS.map(([k, l], i) => `<button class="chip ${i === 0 ? "on" : ""}" data-f="${k}">${l}</button>`).join("")}</div>
+        <div class="row" style="gap:8px"><div class="search"><input id="mk-q" placeholder="Filter lots" /></div><a class="btn small primary" href="#/sell">List an item</a></div>
+      </div>
+      <div class="table-wrap"><table class="data-table"><thead><tr><th>Lot</th><th class="num">Bond</th><th class="num hide-sm">Reserve</th><th>Status</th><th class="hide-sm">Rule</th><th class="num">Closes</th></tr></thead>
+      <tbody id="mk-rows"><tr><td colspan="6"><div class="progress spin" style="margin:16px 0"><i></i></div></td></tr></tbody></table></div>
+    </div>`;
+  scramble(view.querySelector("#mk-title"), { duration: 600 });
+  let filter = "all";
+  const apply = () => {
+    const q = view.querySelector("#mk-q").value.trim().toLowerCase();
+    view.querySelectorAll("#mk-rows tr[data-phase]").forEach((tr) => {
+      tr.style.display = (filter === "all" || tr.dataset.phase === filter) && (!q || tr.dataset.item.includes(q)) ? "" : "none";
+    });
+  };
+  view.querySelectorAll(".chip").forEach((c) => {
+    c.onclick = () => {
+      filter = c.dataset.f;
+      view.querySelectorAll(".chip").forEach((x) => x.classList.toggle("on", x === c));
+      apply();
+    };
+  });
+  view.querySelector("#mk-q").oninput = apply;
+  onPrices((p) => {
+    const el = view.querySelector("#mk-zec");
+    if (el && p.ZEC) el.textContent = usd(p.ZEC.usd);
+  });
+  prices().catch(() => {});
   await S.ready;
   await refreshChain();
   if (!S.info) {
-    view.querySelector("#list").outerHTML = offline();
+    view.querySelector("#mk-rows").innerHTML = `<tr><td colspan="6">${offline()}</td></tr>`;
     return;
   }
-  const list = await loadAuctions();
-  if (!current(token)) return;
-  S.auctions = list;
-  view.querySelector("#count").textContent = `${list.length} on ${netName(S.net)}`;
-  view.querySelector("#list").innerHTML = list.length
-    ? list.map(auctionCard).join("")
-    : `<div class="panel empty" style="grid-column:1/-1"><h3>No auctions yet</h3><p>Be the first: <a href="#/sell">list something</a>.</p></div>`;
-  every(30000, async () => {
+  const draw = async () => {
+    const [list, agents] = await Promise.all([loadAuctions(), api("/v1/agents").catch(() => [])]);
+    if (!current(token)) return;
+    S.auctions = list;
+    const phases = list.map((a) => phase(a.terms, S.info.tip).key);
+    view.querySelector("#mk-live").textContent = list.length;
+    view.querySelector("#mk-bidding").textContent = phases.filter((k) => k === "bidding").length;
+    view.querySelector("#mk-agents").textContent = agents.length;
+    view.querySelector("#mk-total").textContent = `${zec(list.filter((_, i) => phases[i] !== "open").reduce((s, a) => s + a.terms.bond, 0))} ${unit()}`;
+    view.querySelector("#mk-rows").innerHTML = list.length
+      ? list.map(marketRow).join("")
+      : `<tr><td colspan="6"><div class="empty"><h3>No auctions yet on ${netName(S.net)}</h3><p>Be the first: <a href="#/sell">list something</a>.</p></div></td></tr>`;
+    apply();
+  };
+  await draw();
+  every(20000, async () => {
     await refreshChain();
-    if (current(token) && S.auctions.length) view.querySelector("#list").innerHTML = S.auctions.map(auctionCard).join("");
+    if (current(token)) await draw();
   });
 }
 
@@ -374,12 +446,24 @@ async function renderAuction(m, token) {
 
   const rule = terms.rule === "first_price" || terms.rule === "FirstPrice" ? "First price" : "Second price";
   view.innerHTML = `
-    <div class="row between" style="margin-bottom:8px">
-      <a href="#/" class="faint">← Market</a>
-      <span class="faint mono" title="Auction id: the hash of every term below">${id.slice(0, 16)}…</span>
+    <div class="row between" style="margin:6px 0 14px">
+      <a href="#/market" class="faint">← Market</a>
+      <span id="phase-badge"></span>
     </div>
-    <div class="row" style="margin-bottom:6px"><span id="phase-badge"></span><span class="badge">${rule}</span></div>
-    <h1 style="font-size:clamp(26px,3.6vw,40px)">${esc(terms.item)}</h1>
+    <h1 class="title-split">${titleSplit(terms.item)}</h1>
+    <div class="meta-chips">
+      <span class="meta-chip mono" title="Auction id: the hash of every term on this page">${id.slice(0, 6)}…${id.slice(-4)}</span>
+      <span class="meta-chip">${netName(terms.network)}</span>
+      <span class="meta-chip">${rule}</span>
+      <span class="meta-chip">2 of 3 FROST vault</span>
+      <span class="meta-chip">drand round ${terms.close_round.toLocaleString()}</span>
+    </div>
+    <div class="big-stats">
+      <div><span>Bond (max bid)</span><b>${dimUnit(zec(terms.bond))}</b><small>${unit()} ${usdPill(terms.bond)}</small></div>
+      <div><span>Reserve</span><b>${dimUnit(zec(terms.reserve))}</b><small>${unit()} ${usdPill(terms.reserve)}</small></div>
+      <div><span>Bids until block</span><b>${terms.bids_until_height.toLocaleString()}</b><small id="bs-left">&nbsp;</small></div>
+      <div><span>Unseals</span><b id="bs-unseal">–</b><small>${new Date(roundTime(terms.close_round) * 1000).toLocaleString()}</small></div>
+    </div>
     <div class="timeline" id="timeline"></div>
     <div class="split" style="margin-top:18px">
       <div>
@@ -390,7 +474,7 @@ async function renderAuction(m, token) {
           <div id="audit-out"></div>
         </div>
       </div>
-      <div>
+      <div class="sticky-side">
         <div class="panel" id="bid-panel"></div>
         <div class="panel">
           <h2>Terms</h2>
@@ -413,6 +497,9 @@ async function renderAuction(m, token) {
   const draw = () => {
     const p = phase(terms, S.info && S.info.tip);
     view.querySelector("#phase-badge").outerHTML = `<span id="phase-badge" class="badge ${p.key}">${p.label}</span>`;
+    const left = Math.max(0, terms.bids_until_height - (S.info ? S.info.tip : 0));
+    view.querySelector("#bs-left").textContent = left ? `${left} blocks left` : "bidding closed";
+    view.querySelector("#bs-unseal").innerHTML = p.key === "open" ? "Now" : dimUnit(ago(p.opensAt - Date.now() / 1000));
     const steps = [
       ["Bidding", `until block ${terms.bids_until_height.toLocaleString()}`, "bidding"],
       ["Sealed", "bids locked until the round", "sealed"],
@@ -864,6 +951,26 @@ function renderHow() {
 }
 
 // ---------- start ----------
+
+// Header: glass when scrolled, mega menu, mobile menu, live ticker.
+const top = document.getElementById("top");
+addEventListener("scroll", () => top.classList.toggle("scrolled", scrollY > 8), { passive: true });
+const megaTrigger = document.getElementById("mega-trigger");
+const mega = document.getElementById("mega");
+let megaTimer = 0;
+const setMega = (open) => {
+  clearTimeout(megaTimer);
+  document.body.classList.toggle("mega-open", open);
+  megaTrigger.setAttribute("aria-expanded", String(open));
+};
+megaTrigger.onclick = () => setMega(!document.body.classList.contains("mega-open"));
+megaTrigger.onmouseenter = () => setMega(true);
+[megaTrigger, mega].forEach((el) => (el.onmouseleave = () => (megaTimer = setTimeout(() => setMega(false), 220))));
+mega.onmouseenter = () => clearTimeout(megaTimer);
+addEventListener("keydown", (e) => e.key === "Escape" && setMega(false));
+document.getElementById("menu-btn").onclick = () => document.body.classList.toggle("menu-open");
+mountTicker(document.getElementById("ticker"), ["TACIT · SEALED MARKETS ON ZCASH", "TESTNET LIVE", "SHIELDS UP"]);
+document.querySelectorAll(".wordmark").forEach((w) => w.parentElement.addEventListener("mouseenter", () => scramble(w, { duration: 500 })));
 
 window.addEventListener("hashchange", route);
 refreshChain().then(route);

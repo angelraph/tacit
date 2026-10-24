@@ -1,0 +1,523 @@
+/* Components added for the landing page and the redesigned app pages. */
+
+/* ---------- mega menu (Namada) ---------- */
+
+.mega-trigger {
+  all: unset;
+  cursor: pointer;
+  padding: 8px 15px;
+  border-radius: 999px;
+  color: var(--muted);
+  font-weight: 500;
+  font-size: 14px;
+}
+.mega-trigger span {
+  display: inline-block;
+  font-size: 10px;
+  margin-left: 2px;
+  transition: transform 0.3s var(--ease);
+}
+.mega-trigger:hover,
+body.mega-open .mega-trigger {
+  color: var(--text);
+}
+body.mega-open .mega-trigger span {
+  transform: rotate(180deg);
+}
+.mega {
+  position: fixed;
+  z-index: 28;
+  top: 96px;
+  left: 50%;
+  width: min(1180px, calc(100vw - 32px));
+  transform: translate(-50%, -10px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease, transform 0.35s var(--ease);
+}
+body.mega-open .mega {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translate(-50%, 0);
+}
+.mega-inner {
+  padding: 26px;
+  border-radius: 22px;
+  border: 1px solid var(--line-2);
+  background: rgba(10, 10, 16, 0.96);
+  backdrop-filter: blur(18px);
+  box-shadow: 0 40px 100px -30px rgba(0, 0, 0, 0.9);
+}
+.mega-title {
+  font: 600 26px var(--display);
+  letter-spacing: -0.02em;
+  text-transform: uppercase;
+  margin-bottom: 16px;
+}
+.mega-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0;
+}
+.mega-grid a {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-rows: auto auto;
+  column-gap: 14px;
+  padding: 18px 18px 18px 20px;
+  border-radius: 14px;
+  color: var(--text);
+  transition: background 0.25s ease, color 0.25s ease;
+}
+/* Bracket dividers that slide, like Namada's. */
+.mega-grid a::before,
+.mega-grid a::after {
+  content: "";
+  position: absolute;
+  background: var(--line-2);
+  transition: all 0.5s var(--ease);
+}
+.mega-grid a::before {
+  left: 0;
+  top: 22%;
+  width: 1px;
+  height: 56%;
+}
+.mega-grid a::after {
+  left: 8px;
+  top: 0;
+  height: 1px;
+  width: 38%;
+}
+.mega-grid a:hover::after {
+  width: 0;
+}
+.mega-grid a:hover::before {
+  height: 0;
+  top: 50%;
+}
+.mega-grid b {
+  font: 600 17px var(--display);
+  text-transform: uppercase;
+  letter-spacing: -0.01em;
+}
+.mega-grid span {
+  grid-column: 1;
+  color: var(--muted);
+  font-size: 13px;
+}
+.mega-grid svg {
+  grid-row: 1 / span 2;
+  grid-column: 2;
+  width: 38px;
+  height: 38px;
+  fill: none;
+  stroke: var(--violet-3);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  align-self: center;
+  transition: transform 0.4s var(--ease);
+}
+.mega-grid a:hover {
+  background: var(--grad);
+  color: #fff;
+}
+.mega-grid a:hover span {
+  color: rgba(255, 255, 255, 0.85);
+}
+.mega-grid a:hover svg {
+  stroke: #fff;
+  transform: rotate(-8deg) scale(1.08);
+}
+
+.launch {
+  height: 38px;
+}
+
+/* ---------- pinned story (Penumbra vision) ---------- */
+
+.story {
+  position: relative;
+  height: 420vh;
+}
+.story-pin {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+  align-items: center;
+  gap: 40px;
+  max-width: var(--page);
+  margin: 0 auto;
+  padding: 80px 16px 40px;
+  overflow: hidden;
+}
+.story-art {
+  position: relative;
+  aspect-ratio: 1;
+  width: min(100%, 620px);
+  justify-self: center;
+}
+.story-art svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.story-art .rays line {
+  stroke: url(#rayGrad);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+.story-steps {
+  position: relative;
+  min-height: 300px;
+}
+.story-step {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  opacity: 0;
+  transform: translateY(30px);
+  filter: blur(8px);
+  transition: opacity 0.7s var(--ease), transform 0.7s var(--ease), filter 0.7s var(--ease);
+  pointer-events: none;
+}
+.story-step.on {
+  opacity: 1;
+  transform: none;
+  filter: none;
+  pointer-events: auto;
+}
+.story-step .k {
+  color: var(--violet-3);
+  font: 600 13px var(--mono);
+  letter-spacing: 0.14em;
+  margin-bottom: 14px;
+}
+.story-step h3 {
+  font: 700 clamp(30px, 4vw, 52px) / 1.02 var(--display);
+  letter-spacing: -0.035em;
+  margin-bottom: 18px;
+}
+.story-step p {
+  color: var(--muted);
+  font-size: 17px;
+  max-width: 460px;
+}
+.story-dots {
+  position: absolute;
+  left: 0;
+  bottom: -40px;
+  display: flex;
+  gap: 8px;
+}
+.story-dots i {
+  width: 26px;
+  height: 3px;
+  border-radius: 3px;
+  background: var(--line-2);
+  transition: background 0.4s, width 0.4s var(--ease);
+}
+.story-dots i.on {
+  width: 46px;
+  background: var(--grad);
+}
+
+/* ---------- trio light columns (Penumbra) ---------- */
+
+.trio-wrap {
+  position: relative;
+  isolation: isolate;
+}
+.columns {
+  position: absolute;
+  inset: -40px 0 auto 0;
+  height: 300px;
+  z-index: -1;
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  pointer-events: none;
+  -webkit-mask: linear-gradient(180deg, transparent, #000 20%, #000 70%, transparent);
+  mask: linear-gradient(180deg, transparent, #000 20%, #000 70%, transparent);
+}
+.columns i {
+  position: relative;
+  border-left: 1px solid rgba(255, 255, 255, 0.04);
+  background: linear-gradient(180deg, transparent, rgba(109, 92, 255, var(--a, 0.25)) var(--p, 50%), transparent);
+  transition: --p 1s var(--ease), --a 1s var(--ease), clip-path 1s var(--ease), opacity 1s;
+  clip-path: inset(var(--t, 30%) 0 var(--b, 30%) 0 round 40px);
+  opacity: var(--o, 0.8);
+  filter: blur(var(--bl, 0px));
+}
+.trio-wrap[data-tab="0"] .columns i {
+  --t: 25%;
+  --b: 25%;
+  --bl: 18px;
+}
+.trio-wrap[data-tab="1"] .columns i {
+  --t: 0%;
+  --b: 0%;
+  --bl: 0px;
+  --o: 0.55;
+}
+.trio-wrap[data-tab="2"] .columns i:nth-child(odd) {
+  --t: 10%;
+  --b: 45%;
+  --bl: 8px;
+}
+.trio-wrap[data-tab="2"] .columns i:nth-child(even) {
+  --t: 45%;
+  --b: 10%;
+  --bl: 8px;
+}
+.trio-body .trio-text {
+  grid-column: var(--col, 1);
+}
+
+/* ---------- Morpho-style detail ---------- */
+
+.title-split {
+  font: 300 clamp(36px, 5vw, 64px) / 1.04 var(--display);
+  letter-spacing: -0.035em;
+  margin: 0 0 14px;
+}
+.title-split .dim {
+  color: var(--faint);
+}
+.meta-chips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+.meta-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid var(--line-2);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--muted);
+  font-size: 13px;
+  white-space: nowrap;
+}
+.big-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 22px;
+  margin: 26px 0 8px;
+}
+.big-stats span {
+  display: block;
+  color: var(--faint);
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+.big-stats b {
+  display: block;
+  font: 400 clamp(28px, 3vw, 40px) / 1.05 var(--display);
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+}
+.big-stats b i {
+  font-style: normal;
+  color: var(--faint);
+}
+.big-stats small {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.usd-pill {
+  display: inline-block;
+  margin-top: 4px;
+  padding: 1px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--muted);
+  font-size: 12px;
+}
+.sticky-side {
+  position: sticky;
+  top: 90px;
+}
+.underline-tabs {
+  display: flex;
+  gap: 22px;
+  border-bottom: 1px solid var(--line);
+  margin: 26px 0 18px;
+  overflow-x: auto;
+}
+.underline-tabs button {
+  all: unset;
+  cursor: pointer;
+  padding: 12px 0;
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 15px;
+  border-bottom: 2px solid transparent;
+  white-space: nowrap;
+}
+.underline-tabs button.on {
+  color: var(--violet-3);
+  border-color: var(--violet);
+}
+.table-card {
+  border-radius: 20px;
+  border: 1px solid var(--line);
+  background: rgba(12, 12, 19, 0.85);
+  overflow: hidden;
+  box-shadow: var(--shadow);
+}
+.table-tools {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--line);
+}
+.search {
+  position: relative;
+  width: 240px;
+  max-width: 100%;
+}
+.search input {
+  height: 36px;
+  border-radius: 999px;
+  padding-left: 36px;
+  font-size: 13.5px;
+  background: rgba(255, 255, 255, 0.04);
+}
+.search::before {
+  content: "";
+  position: absolute;
+  left: 13px;
+  top: 50%;
+  width: 11px;
+  height: 11px;
+  border: 1.6px solid var(--faint);
+  border-radius: 50%;
+  transform: translateY(-60%);
+}
+.total-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  height: 36px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid var(--line-2);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--muted);
+  font-size: 13.5px;
+}
+.total-pill b {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- agents ---------- */
+
+.agent-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+}
+.agent-row:last-child {
+  border-bottom: 0;
+}
+.avatar {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  font: 700 15px var(--display);
+  background: var(--grad);
+}
+
+/* ---------- responsive ---------- */
+
+@media (max-width: 1060px) {
+  .mega {
+    display: none;
+  }
+  .launch {
+    display: none;
+  }
+}
+@media (max-width: 900px) {
+  .story {
+    height: auto;
+  }
+  .story-pin {
+    position: relative;
+    height: auto;
+    grid-template-columns: 1fr;
+    padding: 60px 16px;
+  }
+  .story-art {
+    width: min(100%, 420px);
+  }
+  .story-steps {
+    min-height: 0;
+  }
+  .story-step {
+    position: relative;
+    opacity: 1;
+    transform: none;
+    filter: none;
+    margin-bottom: 40px;
+  }
+  .story-dots {
+    display: none;
+  }
+  .big-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .sticky-side {
+    position: static;
+  }
+  .trio-body .trio-text {
+    grid-column: 1;
+  }
+}
+@media (max-width: 640px) {
+  .mega-grid {
+    grid-template-columns: 1fr;
+  }
+  .search {
+    width: 100%;
+  }
+}
+
+/* Penumbra: the card title and arrow take the accent on hover. */
+.go h3,
+.go .arrow {
+  transition: color 0.25s ease, transform 0.25s var(--ease);
+}
+.go:hover h3,
+.go:hover .arrow {
+  color: var(--violet-3);
+}
+.go:hover .arrow {
+  transform: translate(2px, -2px);
+}
+@media (max-height: 820px) {
+  .scroll-hint {
+    display: none;
+  }
+}
