@@ -253,6 +253,25 @@ export async function proveWith(method, args, onProgress) {
   return r;
 }
 
+// Brings the open wallet to the tip. A long gap (a restore, or a wallet
+// left alone for days) goes to the threaded worker, which trial-decrypts on
+// every core; short ones stay in the wallet worker. Saves the result.
+async function catchUpWallet(onProgress) {
+  const threads = self.crossOriginIsolated && typeof SharedArrayBuffer !== "undefined";
+  const gap = S.info && S.wallet ? S.info.tip - S.wallet.height : 0;
+  let r;
+  if (threads && gap > 2000) {
+    await prove("init", { threads, gatewayUrl: gatewayUrl() });
+    r = await prove("syncSaved", { phrase: S.phrase, saved: storedWallet().saved }, onProgress);
+    r.state = await call("openWallet", { phrase: S.phrase, saved: r.saved });
+  } else {
+    r = await call("sync", {}, onProgress);
+  }
+  saveScan(r.saved);
+  S.wallet = r.state;
+  return r;
+}
+
 export async function syncWallet(quiet) {
   if (!S.wallet) return;
   try {
@@ -1107,9 +1126,7 @@ async function renderWallet(_, token) {
   view.querySelector("#sync").onclick = async () => {
     const b = busy("Syncing");
     try {
-      const r = await call("sync", {}, b.onProgress);
-      saveScan(r.saved);
-      S.wallet = r.state;
+      await catchUpWallet(b.onProgress);
       b.close();
       route();
     } catch (e) {
@@ -1176,9 +1193,7 @@ function renderUnlock(rec, token) {
       S.wallet = await call("openWallet", { phrase, saved: rec.saved });
       const b = busy("Catching up");
       try {
-        const r = await call("sync", {}, b.onProgress);
-        saveScan(r.saved);
-        S.wallet = r.state;
+        await catchUpWallet(b.onProgress);
       } catch (e) {
         toast(e.message, "error");
       }
@@ -1273,22 +1288,8 @@ async function createWallet(phrase, pass, birthday, token) {
     S.phrase = phrase;
     safeSet(`tacit.seats.${S.net}`, null);
     S.wallet = r.state;
-    if (birthday != null) {
-      // Restoring scans every block since the birthday. The threaded worker
-      // decrypts on all cores; without cross-origin isolation, the wallet
-      // worker does it on one.
-      const threads = self.crossOriginIsolated && typeof SharedArrayBuffer !== "undefined";
-      let s;
-      if (threads) {
-        await prove("init", { threads, gatewayUrl: gatewayUrl() });
-        s = await prove("syncSaved", { phrase, saved: r.saved }, b.onProgress);
-        S.wallet = await call("openWallet", { phrase, saved: s.saved });
-      } else {
-        s = await call("sync", {}, b.onProgress);
-        S.wallet = s.state;
-      }
-      saveScan(s.saved);
-    }
+    // Restoring scans every block since the birthday.
+    if (birthday != null) await catchUpWallet(b.onProgress);
     b.close();
     warmProver().catch(() => {});
     toast("Wallet ready", "good");
