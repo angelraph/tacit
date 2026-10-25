@@ -208,23 +208,27 @@ impl Scanner {
     }
 
     /// Scans consecutive blocks starting right after the last one scanned.
+    ///
+    /// Trial decryption, the costly part, touches nothing but the keys, so
+    /// the whole batch is decrypted first (on every core with the `parallel`
+    /// feature) and then applied block by block in order.
     pub fn scan(&mut self, blocks: &[Block]) -> Result<()> {
-        for b in blocks {
-            self.scan_block(b)?;
+        #[cfg(feature = "parallel")]
+        let parsed: Vec<Result<(Vec<Vec<Parsed>>, bool)>> = {
+            use rayon::prelude::*;
+            blocks.par_iter().map(|b| self.parse_block(b)).collect()
+        };
+        #[cfg(not(feature = "parallel"))]
+        let parsed: Vec<Result<(Vec<Vec<Parsed>>, bool)>> = blocks.iter().map(|b| self.parse_block(b)).collect();
+        for (b, p) in blocks.iter().zip(parsed) {
+            self.scan_block(b, p?)?;
         }
         Ok(())
     }
 
-    fn scan_block(&mut self, b: &Block) -> Result<()> {
-        if b.height as u32 != self.height + 1 {
-            return Err(Error::Chain(format!("expected block {}, got {}", self.height + 1, b.height)));
-        }
-        if !self.hash.is_empty() && b.prev_hash != self.hash {
-            return Err(Error::Reorg(self.height));
-        }
-
-        // Parse and trial-decrypt the whole block first, without changing
-        // anything, so a block that pays us can stop and ask for the tree.
+    /// Parses and trial-decrypts one block without changing anything.
+    /// Returns its actions and whether any of them pays us.
+    fn parse_block(&self, b: &Block) -> Result<(Vec<Vec<Parsed>>, bool)> {
         let mut parsed: Vec<Vec<Parsed>> = Vec::with_capacity(b.txs.len());
         let mut pays_us = false;
         for tx in &b.txs {
@@ -249,6 +253,18 @@ impl Scanner {
             }
             parsed.push(actions);
         }
+        Ok((parsed, pays_us))
+    }
+
+    fn scan_block(&mut self, b: &Block, (parsed, pays_us): (Vec<Vec<Parsed>>, bool)) -> Result<()> {
+        if b.height as u32 != self.height + 1 {
+            return Err(Error::Chain(format!("expected block {}, got {}", self.height + 1, b.height)));
+        }
+        if !self.hash.is_empty() && b.prev_hash != self.hash {
+            return Err(Error::Reorg(self.height));
+        }
+        // A block that pays us needs the tree to start a witness; stop and
+        // ask for it before changing anything.
         if pays_us && self.witnesses && self.tree.is_none() {
             return Err(Error::NeedTree(self.height));
         }

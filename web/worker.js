@@ -153,6 +153,15 @@ const methods = {
     return { saved: wallet.save(), state: walletState() };
   },
 
+  // A long catch-up (restoring an older wallet) on the threaded build, which
+  // trial-decrypts on every core. Returns the state for the wallet worker.
+  async syncSaved({ phrase: p, saved }, id) {
+    wallet = tacit.Wallet.load(p, saved);
+    phrase = p;
+    await catchUp(id, wallet, "Syncing wallet");
+    return { saved: wallet.save(), state: walletState() };
+  },
+
   openWallet({ phrase: p, saved }) {
     wallet = tacit.Wallet.load(p, saved);
     phrase = p;

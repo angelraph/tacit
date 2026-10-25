@@ -1274,9 +1274,20 @@ async function createWallet(phrase, pass, birthday, token) {
     safeSet(`tacit.seats.${S.net}`, null);
     S.wallet = r.state;
     if (birthday != null) {
-      const s = await call("sync", {}, b.onProgress);
+      // Restoring scans every block since the birthday. The threaded worker
+      // decrypts on all cores; without cross-origin isolation, the wallet
+      // worker does it on one.
+      const threads = self.crossOriginIsolated && typeof SharedArrayBuffer !== "undefined";
+      let s;
+      if (threads) {
+        await prove("init", { threads, gatewayUrl: gatewayUrl() });
+        s = await prove("syncSaved", { phrase, saved: r.saved }, b.onProgress);
+        S.wallet = await call("openWallet", { phrase, saved: s.saved });
+      } else {
+        s = await call("sync", {}, b.onProgress);
+        S.wallet = s.state;
+      }
       saveScan(s.saved);
-      S.wallet = s.state;
     }
     b.close();
     warmProver().catch(() => {});

@@ -3046,6 +3046,7 @@ dependencies = [
  "orchard",
  "pczt",
  "rand_core 0.6.4",
+ "rayon",
  "serde",
  "serde_json",
  "tacit-core",

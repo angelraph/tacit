@@ -22,6 +22,12 @@ hex = "0.4"
 rand_core = { version = "0.6", features = ["getrandom"] }
 blake2b_simd = "1"
 thiserror = "2"
+rayon = { version = "1", optional = true }
+
+[features]
+# Trial-decrypts the blocks of a batch on every core. Needs threads (natively,
+# or the browser's threaded build).
+parallel = ["dep:rayon"]
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.2", features = ["js"] }

@@ -29,4 +29,4 @@ wasm-bindgen-rayon = { version = "1.3", optional = true }
 [features]
 # Multithreaded proving in the browser. Needs a nightly build with atomics
 # (see spikes/wasm-bench/build-threads.sh) and a cross-origin isolated page.
-threads = ["dep:wasm-bindgen-rayon", "orchard/multicore"]
+threads = ["dep:wasm-bindgen-rayon", "orchard/multicore", "tacit-light/parallel"]
