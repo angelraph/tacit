@@ -119,16 +119,19 @@ pub async fn run(home: &Home, role: Role, name: String, run_by: String) -> Resul
                         // Seats are seller, operator, arbiter: ask the arbiter.
                         let with = if v.seat == 3 { 2 } else { 3 };
                         println!("auction {id}: bids are open, settling with seat {with}");
-                        state.settled.insert(id.clone());
-                        save(&state)?;
+                        // Recorded only once the payout is out: an agent that
+                        // stops halfway (a restart, a sleeping machine) must
+                        // try again when it comes back.
                         match settle_auction(home, &id, &vault, with).await {
-                            Ok(txid) => println!("auction {id}: settled in {txid}"),
+                            Ok(txid) => {
+                                println!("auction {id}: settled in {txid}");
+                                state.settled.insert(id.clone());
+                                save(&state)?;
+                            }
                             Err(e) => {
                                 // Nothing deposited yet, a cosigner that is
                                 // slow to answer, or a node hiccup: try again
                                 // in a minute.
-                                state.settled.remove(&id);
-                                save(&state)?;
                                 // An auction that closed with no deposits has
                                 // nothing to do unless someone pays in late (and
                                 // is owed a refund), so look rarely.

@@ -139,7 +139,14 @@ pub fn regtest() -> LocalNetwork {
 /// URLs (public servers such as testnet.zec.rocks).
 pub async fn connect(url: &str) -> Result<CompactTxStreamerClient<Channel>, WalletError> {
     let grpc = |e: tonic::transport::Error| WalletError::Grpc(e.to_string());
-    let mut endpoint = tonic::transport::Endpoint::from_shared(url.to_string()).map_err(grpc)?;
+    // Notice a dead link within seconds instead of waiting on it forever.
+    let mut endpoint = tonic::transport::Endpoint::from_shared(url.to_string())
+        .map_err(grpc)?
+        .connect_timeout(std::time::Duration::from_secs(15))
+        .timeout(std::time::Duration::from_secs(90))
+        .http2_keep_alive_interval(std::time::Duration::from_secs(30))
+        .keep_alive_timeout(std::time::Duration::from_secs(10))
+        .keep_alive_while_idle(true);
     if url.starts_with("https://") {
         endpoint = endpoint
             .tls_config(tonic::transport::ClientTlsConfig::new().with_webpki_roots())

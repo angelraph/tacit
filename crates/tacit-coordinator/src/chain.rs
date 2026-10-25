@@ -61,7 +61,16 @@ impl Chain {
     /// Points at a lightwalletd-compatible gRPC server. Connects lazily, so the
     /// coordinator starts even while the node is down.
     pub fn new(url: &str) -> Result<Self, String> {
-        let mut endpoint = Endpoint::from_shared(url.to_string()).map_err(|e| e.to_string())?;
+        // A connection can die silently (a sleeping laptop, a dropped NAT
+        // entry). Keep-alive pings notice within seconds and the channel
+        // reconnects, and no request waits on a dead link for long.
+        let mut endpoint = Endpoint::from_shared(url.to_string())
+            .map_err(|e| e.to_string())?
+            .connect_timeout(Duration::from_secs(15))
+            .timeout(Duration::from_secs(90))
+            .http2_keep_alive_interval(Duration::from_secs(30))
+            .keep_alive_timeout(Duration::from_secs(10))
+            .keep_alive_while_idle(true);
         if url.starts_with("https://") {
             endpoint = endpoint
                 .tls_config(tonic::transport::ClientTlsConfig::new().with_webpki_roots())
