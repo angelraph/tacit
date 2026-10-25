@@ -797,7 +797,7 @@ async function placeBid(terms, id, amount) {
       b.close();
       modal(`
         <h2>Bid sealed and sent</h2>
-        <p class="notice good">Your ${zec(terms.bond)} ${unit()} bond is on its way to the vault. It was proved in ${(r.proveMs / 1000).toFixed(1)} s right here in your browser, while you confirmed.</p>
+        <p class="notice good">Your ${zec(terms.bond)} ${unit()} bond is on its way to the vault. It was proved in ${(r.proveMs / 1000).toFixed(1)} s right here in your browser.</p>
         <p class="faint" style="margin-top:12px;font-size:13px">Transaction</p><div class="addr">${esc(r.txid)}</div>
         <div class="row" style="margin-top:16px"><span class="spacer"></span><button class="btn primary" data-close>Done</button></div>`);
       route();
