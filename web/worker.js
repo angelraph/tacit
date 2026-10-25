@@ -94,8 +94,12 @@ const methods = {
     return { ms: 0 };
   },
 
-  newPhrase() {
-    return tacit.newPhrase();
+  newPhrase({ words } = {}) {
+    return tacit.newPhrase(words || 24);
+  },
+
+  sealBidMemo({ terms, amount, refundAddress, text }) {
+    return tacit.sealBidMemo(JSON.stringify(terms), BigInt(amount), refundAddress, !!text);
   },
 
   checkPhrase({ phrase }) {

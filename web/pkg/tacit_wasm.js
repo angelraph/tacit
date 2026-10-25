@@ -692,14 +692,16 @@ export function escrowId(terms) {
 }
 
 /**
- * A fresh 24 word recovery phrase.
+ * A fresh recovery phrase of 12 words (128 bits of entropy) or 24 words
+ * (256 bits, the default, as Zashi uses).
+ * @param {number} words
  * @returns {string}
  */
-export function newPhrase() {
+export function newPhrase(words) {
     let deferred2_0;
     let deferred2_1;
     try {
-        const ret = wasm.newPhrase();
+        const ret = wasm.newPhrase(words);
         var ptr1 = ret[0];
         var len1 = ret[1];
         if (ret[3]) {
@@ -749,6 +751,42 @@ export function roundAt(unix) {
 export function roundTime(round) {
     const ret = wasm.roundTime(round);
     return BigInt.asUintN(64, ret);
+}
+
+/**
+ * Seals a bid for someone paying from their own Zcash wallet (Zashi, Zingo,
+ * YWallet...). Returns the 512 byte memo as hex; the wallet sends exactly
+ * `terms.bond` to the vault with it. Refunds go to `refund_address`, which
+ * must be a unified address with a shielded receiver on the auction's
+ * network, ideally a fresh one. With `text` set it returns the printable
+ * form instead, for extension wallets whose API takes a UTF-8 memo.
+ * @param {string} terms
+ * @param {bigint} amount
+ * @param {string} refund_address
+ * @param {boolean} text
+ * @returns {string}
+ */
+export function sealBidMemo(terms, amount, refund_address, text) {
+    let deferred4_0;
+    let deferred4_1;
+    try {
+        const ptr0 = passStringToWasm0(terms, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(refund_address, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.sealBidMemo(ptr0, len0, amount, ptr1, len1, text);
+        var ptr3 = ret[0];
+        var len3 = ret[1];
+        if (ret[3]) {
+            ptr3 = 0; len3 = 0;
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        deferred4_0 = ptr3;
+        deferred4_1 = len3;
+        return getStringFromWasm0(ptr3, len3);
+    } finally {
+        wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
+    }
 }
 
 /**

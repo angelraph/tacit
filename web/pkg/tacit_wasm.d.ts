@@ -160,9 +160,10 @@ export function checkPhrase(phrase: string): boolean;
 export function escrowId(terms: string): string;
 
 /**
- * A fresh 24 word recovery phrase.
+ * A fresh recovery phrase of 12 words (128 bits of entropy) or 24 words
+ * (256 bits, the default, as Zashi uses).
  */
-export function newPhrase(): string;
+export function newPhrase(words: number): string;
 
 /**
  * A fresh seat key: the secret, hex. Keep it with the wallet.
@@ -178,6 +179,16 @@ export function roundAt(unix: bigint): bigint;
  * Unix time (seconds) at which a drand quicknet round is published.
  */
 export function roundTime(round: bigint): bigint;
+
+/**
+ * Seals a bid for someone paying from their own Zcash wallet (Zashi, Zingo,
+ * YWallet...). Returns the 512 byte memo as hex; the wallet sends exactly
+ * `terms.bond` to the vault with it. Refunds go to `refund_address`, which
+ * must be a unified address with a shielded receiver on the auction's
+ * network, ideally a fresh one. With `text` set it returns the printable
+ * form instead, for extension wallets whose API takes a UTF-8 memo.
+ */
+export function sealBidMemo(terms: string, amount: bigint, refund_address: string, text: boolean): string;
 
 export function seatPublic(secret: string): string;
 
@@ -223,10 +234,11 @@ export interface InitOutput {
     readonly escrowId: (a: number, b: number) => [number, number, number, number];
     readonly ironwoodprover_new: () => number;
     readonly ironwoodprover_prove: (a: number, b: number) => [number, number, number];
-    readonly newPhrase: () => [number, number, number, number];
+    readonly newPhrase: (a: number) => [number, number, number, number];
     readonly newSeatKey: () => [number, number];
     readonly roundAt: (a: bigint) => bigint;
     readonly roundTime: (a: bigint) => bigint;
+    readonly sealBidMemo: (a: number, b: number, c: bigint, d: number, e: number, f: number) => [number, number, number, number];
     readonly seatPublic: (a: number, b: number) => [number, number, number, number];
     readonly start: () => void;
     readonly vaultAddress: (a: number, b: number, c: number, d: number) => [number, number, number, number];

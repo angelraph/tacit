@@ -1,0 +1,23 @@
+{
+  "name": "Tacit",
+  "short_name": "Tacit",
+  "description": "Sealed-bid auctions and shielded escrow on Zcash, with a wallet that keeps your keys on your device.",
+  "id": "./",
+  "start_url": "./#/market",
+  "scope": "./",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone"],
+  "background_color": "#06060a",
+  "theme_color": "#06060a",
+  "categories": ["finance", "utilities"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Market", "url": "./#/market", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Wallet", "url": "./#/wallet", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Escrow", "url": "./#/escrow", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] }
+  ]
+}

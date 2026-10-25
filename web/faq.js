@@ -35,8 +35,20 @@ export const FAQ = [
     a: `<p>Yes, on mainnet. Tacit asks NEAR Intents 1Click for a quote that delivers ZEC straight to a fresh shielded address of your wallet. You pay the one-time deposit address from whatever wallet you like. The deposit is public on its own chain, but nothing on the Zcash side links the ZEC to your bids or payments.</p>`,
   },
   {
+    q: "Can I bid with Noir, Zashi or another wallet I already use?",
+    a: `<p>Yes. On any auction, the "Noir Wallet" tab connects a Zcash browser extension: your bid is sealed in this tab, and the extension pays the bond with the sealed memo after one approval. Refunds go back to that wallet's shielded address. The "Any wallet" tab makes a ZIP 321 payment request with a QR code for mobile wallets such as Zashi, Zingo or YWallet. Or use the Tacit wallet built into the app. All three settle the same way.</p>`,
+  },
+  {
+    q: "How do I get testnet coins?",
+    a: `<p>Open the wallet on testnet and press "Get free TAZ". Tacit's own faucet sends test coins straight to your shielded address, once a day per address. The faucet refills from donations to its transparent address, which it shields automatically.</p>`,
+  },
+  {
+    q: "Can I install Tacit like an app?",
+    a: `<p>Yes. In Chrome, Edge or Brave press "Install" in the header (or "Add to Home screen" on your phone). Tacit then opens in its own window, with shortcuts to the market, wallet and escrow. Your keys stay on the device either way.</p>`,
+  },
+  {
     q: "Where do my keys live?",
-    a: `<p>In this browser tab. Your recovery phrase, seat key and vault shares are encrypted with your passcode and kept in the browser's storage. Syncing works by downloading whole ranges of blocks and decrypting them locally, so the coordinator never learns which notes are yours. Write the 24 words down: they are the only way back in.</p>`,
+    a: `<p>In this browser tab. Your recovery phrase, seat key and vault shares are encrypted with your passcode and kept in the browser's storage. Syncing works by downloading whole ranges of blocks and decrypting them locally, so the coordinator never learns which notes are yours. Write the words down: they are the only way back in.</p>`,
   },
   {
     q: "What does it cost?",

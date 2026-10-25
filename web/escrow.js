@@ -241,7 +241,7 @@ async function renderDeal(id, ctx) {
   } else if (!funded) {
     html = `<span class="badge bidding">Waiting for payment</span>
       <h2 style="margin-top:10px">${zec(st.balance)} of ${zec(t.amount)} ${unit()} paid in</h2>
-      ${myRole === "buyer" ? `<p class="muted">Pay the price into the vault from your Tacit wallet. Nobody on chain can tell it's an escrow payment.</p><button class="btn primary" id="fund">Pay ${zec(t.amount)} ${unit()} into escrow</button>` : `<p class="muted">The buyer hasn't paid in yet. This page updates when they do.</p>`}`;
+      ${myRole === "buyer" ? `<p class="muted">Pay the price into the vault from your Tacit wallet. Nobody on chain can tell it's an escrow payment.</p><div class="row" style="flex-wrap:wrap"><button class="btn primary" id="fund">Pay ${zec(t.amount)} ${unit()} into escrow</button>${ctx.ext() ? `<button class="btn" id="fund-ext">Pay with ${esc(ctx.ext().name)}</button>` : ""}</div>` : `<p class="muted">The buyer hasn't paid in yet. This page updates when they do.</p>`}`;
   } else {
     html = `<span class="badge settled">Funded</span>
       <h2 style="margin-top:10px">${zec(st.balance)} ${unit()} held in escrow</h2>
@@ -289,6 +289,24 @@ async function renderDeal(id, ctx) {
       } catch (e) {
         b.close();
         toast(e.message, "error");
+      }
+    };
+  if (q("#fund-ext"))
+    q("#fund-ext").onclick = async (e) => {
+      const btn = e.currentTarget;
+      const x = ctx.ext();
+      btn.disabled = true;
+      try {
+        btn.textContent = `Connecting ${x.name}…`;
+        await ctx.extConnect(x);
+        btn.textContent = `Approve in ${x.name}…`;
+        await ctx.extSend(x, { to: deal.share.address, amountZat: t.amount, memo: "" });
+        btn.textContent = "Paid ✓";
+        toast("Paid in. It shows up after the next block.", "good");
+      } catch (err) {
+        btn.disabled = false;
+        btn.textContent = `Pay with ${x.name}`;
+        toast(err.message || String(err), "error");
       }
     };
   if (q("#release")) q("#release").onclick = () => pay("seller", "Releasing to the seller");
