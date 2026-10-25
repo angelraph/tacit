@@ -21,6 +21,7 @@ use tacit_core::escrow::EscrowTerms;
 
 pub mod chain;
 pub mod faucet;
+pub mod proof;
 
 /// Largest message body accepted (a PCZT for a big settlement fits easily).
 pub const MAX_BODY: usize = 1 << 20;
@@ -73,7 +74,13 @@ impl AppState {
                  body BLOB NOT NULL,
                  created INTEGER NOT NULL DEFAULT (unixepoch())
              );
-             CREATE INDEX IF NOT EXISTS messages_inbox ON messages (room, recipient, seq);",
+             CREATE INDEX IF NOT EXISTS messages_inbox ON messages (room, recipient, seq);
+             CREATE TABLE IF NOT EXISTS audits (
+                 id TEXT PRIMARY KEY,
+                 verdict TEXT NOT NULL,
+                 report TEXT NOT NULL,
+                 updated INTEGER NOT NULL DEFAULT (unixepoch())
+             );",
         )?;
         // Databases from before rooms had a purpose.
         let has_purpose = conn
@@ -81,6 +88,10 @@ impl AppState {
             .is_ok();
         if !has_purpose {
             conn.execute_batch("ALTER TABLE rooms ADD COLUMN purpose TEXT NOT NULL DEFAULT ''")?;
+        }
+        // Databases from before agents said who runs them.
+        if conn.prepare("SELECT run_by FROM agents LIMIT 0").is_err() {
+            conn.execute_batch("ALTER TABLE agents ADD COLUMN run_by TEXT NOT NULL DEFAULT ''")?;
         }
         Ok(AppState { db: Arc::new(Mutex::new(conn)), chain: None, faucet: None })
     }
@@ -126,6 +137,7 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/escrows/{id}", get(get_escrow))
         .route("/v1/faucet/status", get(faucet::status))
         .route("/v1/faucet/drip", post(faucet::drip))
+        .route("/v1/proof", get(proof::proof))
         .route("/v1/chain/info", get(chain::info))
         .route("/v1/chain/tree/{height}", get(chain::tree))
         .route("/v1/chain/blocks", get(chain::blocks))
@@ -295,6 +307,10 @@ pub struct Agent {
     /// `operator` or `arbiter`.
     pub role: String,
     pub name: String,
+    /// Who runs it: a person or an organisation. Parties pick an operator and
+    /// an arbiter run by different people, so no one of them can move a vault.
+    #[serde(default)]
+    pub run_by: String,
     #[serde(default)]
     pub seen: i64,
 }
@@ -307,10 +323,13 @@ async fn announce_agent(State(s): State<AppState>, Json(a): Json<Agent>) -> Resu
     if a.name.is_empty() || a.name.len() > 64 {
         return Err(bad("name must be 1 to 64 bytes"));
     }
+    if a.run_by.len() > 64 {
+        return Err(bad("run_by must be at most 64 bytes"));
+    }
     s.db.lock().unwrap().execute(
-        "INSERT INTO agents (seat, role, name, seen) VALUES (?1, ?2, ?3, unixepoch())
-         ON CONFLICT (seat) DO UPDATE SET role = ?2, name = ?3, seen = unixepoch()",
-        params![a.seat, a.role, a.name],
+        "INSERT INTO agents (seat, role, name, run_by, seen) VALUES (?1, ?2, ?3, ?4, unixepoch())
+         ON CONFLICT (seat) DO UPDATE SET role = ?2, name = ?3, run_by = ?4, seen = unixepoch()",
+        params![a.seat, a.role, a.name, a.run_by],
     )?;
     Ok(Json(a))
 }
@@ -318,9 +337,12 @@ async fn announce_agent(State(s): State<AppState>, Json(a): Json<Agent>) -> Resu
 /// Agents seen in the last ten minutes.
 async fn list_agents(State(s): State<AppState>) -> Result<Json<Vec<Agent>>, ApiError> {
     let db = s.db.lock().unwrap();
-    let mut stmt =
-        db.prepare("SELECT seat, role, name, seen FROM agents WHERE seen > unixepoch() - 600 ORDER BY role, seen DESC")?;
-    let rows = stmt.query_map([], |r| Ok(Agent { seat: r.get(0)?, role: r.get(1)?, name: r.get(2)?, seen: r.get(3)? }))?;
+    let mut stmt = db.prepare(
+        "SELECT seat, role, name, run_by, seen FROM agents WHERE seen > unixepoch() - 600 ORDER BY role, seen DESC",
+    )?;
+    let rows = stmt.query_map([], |r| {
+        Ok(Agent { seat: r.get(0)?, role: r.get(1)?, name: r.get(2)?, run_by: r.get(3)?, seen: r.get(4)? })
+    })?;
     Ok(Json(rows.collect::<Result<_, _>>()?))
 }
 

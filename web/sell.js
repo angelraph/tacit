@@ -6,7 +6,12 @@ const BONDS = [1e5, 2e5, 5e5, 1e6, 2e6, 5e6, 1e7, 2e7, 5e7, 1e8, 2e8, 5e8, 1e9, 
 
 export async function renderSell(_, ctx) {
   const { S, call, api, busy, toast, esc, zec, parseZec, unit, loadSeats, saveSeats } = ctx;
-  const mins = (blocks) => Math.max(1, Math.round((blocks * ctx.blockSecs()) / 60));
+  // Never plan on blocks coming faster than the network's target spacing
+  // (75 s on mainnet, 25 s on testnet since NU7), however quick the last
+  // few were: unsealing before the bidding height is reached would end
+  // bidding early.
+  const target = { main: 75, test: 25 }[S.net] || 20;
+  const secsPerBlock = () => Math.max(ctx.blockSecs(), target);
   const view = document.getElementById("view");
   await S.ready;
   await ctx.refreshChain();
@@ -26,8 +31,14 @@ export async function renderSell(_, ctx) {
   }
 
   const agents = await api("/v1/agents").catch(() => []);
+  const runBy = (a) => (a && a.run_by) || "unnamed";
   const operators = agents.filter((a) => a.role === "operator");
-  const arbiters = agents.filter((a) => a.role === "arbiter");
+  // Arbiters run by someone other than the first operator come first, so the
+  // default pairing never puts two of the three key shares with one party.
+  const arbiters = agents
+    .filter((a) => a.role === "arbiter")
+    .sort((x, y) => (runBy(x) === runBy(operators[0])) - (runBy(y) === runBy(operators[0])));
+  const agentOption = (a) => `<option value="${a.seat}">${esc(a.name)} · run by ${esc(runBy(a))}</option>`;
   const seats = await loadSeats();
   const listings = seats.vaults.filter((v) => v.kind === "auction");
 
@@ -46,13 +57,24 @@ export async function renderSell(_, ctx) {
           </div>
           <div class="grid cols-2" style="grid-template-columns:1fr 1fr">
             <label class="field"><span>Bidding window</span><select id="blocks">
-              ${[4, 12, 48, 1152].map((b) => `<option value="${b}" ${b === 12 ? "selected" : ""}>${b} blocks (~${mins(b) >= 120 ? Math.round(mins(b) / 60) + " h" : mins(b) + " min"})</option>`).join("")}</select></label>
+              ${[
+                [10, "10 minutes"],
+                [30, "30 minutes"],
+                [60, "1 hour"],
+                [1440, "1 day"],
+              ]
+                .map(([m, label]) => {
+                  const b = Math.max(2, Math.ceil((m * 60) / target));
+                  return `<option value="${b}" ${m === 30 ? "selected" : ""}>${label} (${b} blocks)</option>`;
+                })
+                .join("")}</select></label>
             <label class="field"><span>Price rule</span><select id="rule"><option value="second_price">Second price (Vickrey)</option><option value="first_price">First price</option></select></label>
           </div>
           <div class="grid cols-2" style="grid-template-columns:1fr 1fr">
-            <label class="field"><span>Operator</span><select id="op">${operators.map((a) => `<option value="${a.seat}">${esc(a.name)} · ${a.seat.slice(0, 8)}</option>`).join("") || `<option value="">none online</option>`}</select></label>
-            <label class="field"><span>Arbiter</span><select id="arb">${arbiters.map((a) => `<option value="${a.seat}">${esc(a.name)} · ${a.seat.slice(0, 8)}</option>`).join("") || `<option value="">none online</option>`}</select></label>
+            <label class="field"><span>Operator</span><select id="op">${operators.map(agentOption).join("") || `<option value="">none online</option>`}</select></label>
+            <label class="field"><span>Arbiter</span><select id="arb">${arbiters.map(agentOption).join("") || `<option value="">none online</option>`}</select></label>
           </div>
+          <div id="custody" class="notice" style="font-size:14px"></div>
           <button class="btn primary" id="go">Create vault and publish</button>
         </div>
       </div>
@@ -71,6 +93,28 @@ export async function renderSell(_, ctx) {
         </div>
       </div>
     </div>`;
+
+  // Says plainly who could move the money together.
+  const custody = () => {
+    const el = view.querySelector("#custody");
+    const op = agents.find((a) => a.seat === view.querySelector("#op").value);
+    const arb = agents.find((a) => a.seat === view.querySelector("#arb").value);
+    if (!op || !arb) {
+      el.className = "notice";
+      el.textContent = "";
+      return;
+    }
+    if (runBy(op) === runBy(arb) && runBy(op) !== "unnamed") {
+      el.className = "notice warn";
+      el.innerHTML = `Both agents are run by <b>${esc(runBy(op))}</b>, who would then hold two of the vault's three key shares. Pick an arbiter run by someone else, or <a href="#/agents">run one yourself</a>.`;
+    } else {
+      el.className = "notice good";
+      el.innerHTML = `Independent seats: you, <b>${esc(runBy(op))}</b> and <b>${esc(runBy(arb))}</b> each hold one key share. No single party can move the money, and each cosigner pays out only what the rules compute.`;
+    }
+  };
+  view.querySelector("#op").onchange = custody;
+  view.querySelector("#arb").onchange = custody;
+  custody();
 
   view.querySelector("#go").onclick = async () => {
     const item = view.querySelector("#item").value.trim();
@@ -101,9 +145,10 @@ export async function renderSell(_, ctx) {
       b.onProgress({ label: "Publishing the terms", spin: true });
       const tip = (await api("/v1/chain/info")).tip;
       const bidsUntil = tip + blocks;
-      // Unseal at the first round after the bidding window ends (with a
-      // couple of blocks of slack for slow blocks).
-      const unsealAt = Math.floor(Date.now() / 1000) + Math.ceil((blocks + 2) * ctx.blockSecs());
+      // Unseal after the bidding window ends, with a quarter of the window
+      // (at least five blocks) of slack, since block times wander.
+      const slack = Math.max(5, Math.ceil(blocks / 4));
+      const unsealAt = Math.floor(Date.now() / 1000) + Math.ceil((blocks + slack) * secsPerBlock());
       const closeRound = await call("roundAt", { unix: unsealAt });
       const seller = await call("address", { index: ctx.nextRefundIndex() });
       const terms = {

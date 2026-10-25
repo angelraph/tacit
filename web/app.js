@@ -40,7 +40,7 @@ import { renderSell } from "./sell.js";
 import { renderEscrow } from "./escrow.js";
 import { renderFund } from "./fund.js";
 import { renderLanding } from "./landing.js";
-import { renderFaq, renderAgents, renderTerms, gate } from "./pages.js";
+import { renderFaq, renderAgents, renderTerms, renderProof, gate } from "./pages.js";
 import { mountTicker, onPrices, prices, zecUsd, usd } from "./prices.js";
 import { reveals, glowCards, scramble } from "./motion.js";
 
@@ -301,6 +301,7 @@ const routes = [
   [/^\/how$/, renderHow, "explore"],
   [/^\/faq$/, renderFaq, "explore"],
   [/^\/agents$/, () => renderAgents(ctx), "explore"],
+  [/^\/proof$/, () => renderProof(ctx), "explore"],
   [/^\/terms$/, renderTerms, "explore"],
 ];
 

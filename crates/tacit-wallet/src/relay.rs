@@ -143,8 +143,8 @@ impl Relay {
     }
 
     /// Tells the coordinator this agent is online.
-    pub fn announce(&self, seat: &SeatPub, role: &str, name: &str) -> Result<(), RelayError> {
-        self.post("/v1/agents", &json!({ "seat": hex::encode(seat), "role": role, "name": name }))?;
+    pub fn announce(&self, seat: &SeatPub, role: &str, name: &str, run_by: &str) -> Result<(), RelayError> {
+        self.post("/v1/agents", &json!({ "seat": hex::encode(seat), "role": role, "name": name, "run_by": run_by }))?;
         Ok(())
     }
 

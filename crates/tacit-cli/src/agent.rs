@@ -57,7 +57,7 @@ const POLL: Duration = Duration::from_secs(3);
 const ANNOUNCE: Duration = Duration::from_secs(60);
 const RETRY: Duration = Duration::from_secs(60);
 
-pub async fn run(home: &Home, role: Role, name: String) -> Result<()> {
+pub async fn run(home: &Home, role: Role, name: String, run_by: String) -> Result<()> {
     let me = home.seat_key()?.public();
     let path = home.dir.join(format!("agent-{}.json", role.name()));
     let mut state: State = std::fs::read_to_string(&path)
@@ -74,8 +74,8 @@ pub async fn run(home: &Home, role: Role, name: String) -> Result<()> {
     let mut retry: std::collections::HashMap<String, Instant> = Default::default();
     loop {
         if announced.is_none_or(|t| t.elapsed() > ANNOUNCE) {
-            let (role_s, name_c) = (role.name().to_string(), name.clone());
-            match blocking(home.relay(), move |r| Ok(r.announce(&me, &role_s, &name_c)?)).await {
+            let (role_s, name_c, by_c) = (role.name().to_string(), name.clone(), run_by.clone());
+            match blocking(home.relay(), move |r| Ok(r.announce(&me, &role_s, &name_c, &by_c)?)).await {
                 Ok(()) => announced = Some(Instant::now()),
                 Err(e) => eprintln!("can't reach the coordinator: {e:#}"),
             }
@@ -127,10 +127,18 @@ pub async fn run(home: &Home, role: Role, name: String) -> Result<()> {
                                 // Nothing deposited yet, a cosigner that is
                                 // slow to answer, or a node hiccup: try again
                                 // in a minute.
-                                eprintln!("auction {id}: not settled yet: {e:#}");
                                 state.settled.remove(&id);
                                 save(&state)?;
-                                retry.insert(id.clone(), Instant::now() + RETRY);
+                                // An auction that closed with no deposits has
+                                // nothing to do unless someone pays in late (and
+                                // is owed a refund), so look rarely.
+                                let idle = format!("{e:#}").contains("received no deposits");
+                                if idle {
+                                    println!("auction {id}: closed with no deposits");
+                                } else {
+                                    eprintln!("auction {id}: not settled yet: {e:#}");
+                                }
+                                retry.insert(id.clone(), Instant::now() + if idle { RETRY * 30 } else { RETRY });
                             }
                         }
                     }

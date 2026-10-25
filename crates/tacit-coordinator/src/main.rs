@@ -45,6 +45,12 @@ async fn main() {
         state = state.with_faucet(&url);
         println!("relaying the testnet faucet at {url}");
     }
+    // Audits every published auction in the background for /v1/proof.
+    let has_chain = args.get(3).is_some() || env("TACIT_LIGHTWALLETD").is_some();
+    if has_chain && env("TACIT_PROOF").as_deref() != Some("off") {
+        tacit_coordinator::proof::spawn_auditor(state.clone());
+        println!("auditing every auction for /v1/proof");
+    }
     let mut app = router(state);
     if let Some(dir) = env("TACIT_WEB") {
         // wasm-bindgen-rayon's worker helpers import a package by its folder,

@@ -27,24 +27,28 @@ export function renderFaq() {
 }
 
 export async function renderAgents(ctx) {
-  const { api, esc, ago } = ctx;
+  const { api, esc, ago, S } = ctx;
   const view = document.getElementById("view");
+  const net = S && S.net === "main" ? "main" : "test";
+  const lwd = net === "main" ? "https://zec.rocks:443" : "https://testnet.zec.rocks:443";
+  const gw = (localStorage.getItem("tacit.gateway") || location.origin).replace(/\/$/, "");
   view.innerHTML = `
-    <div class="page-head reveal"><span class="eyebrow">Agents</span><h1>The seats that never sleep</h1><p>Agents are always-online vault seats. Sellers and escrow parties pick one operator and one arbiter. An agent signs only what it has recomputed from the rules, so the worst a dishonest co-seat can get from it is a refusal.</p></div>
+    <div class="page-head reveal"><span class="eyebrow">Agents</span><h1>The seats that never sleep</h1><p>Every vault has three key shares: the seller's, an operator's and an arbiter's. Moving money takes two. Pick an operator and an arbiter run by different people and no single party can touch the funds, and each agent signs only the payout it has recomputed from the published rules.</p></div>
     <div class="split">
       <div class="table-card reveal">
         <div class="table-tools"><b>Online now</b><span class="total-pill">Seen in the last 10 min</span></div>
         <div id="agent-list" style="padding:4px 18px"><div class="progress spin" style="margin:20px 0"><i></i></div></div>
       </div>
       <div class="panel reveal" style="--d:.1s">
-        <h2>Run your own</h2>
-        <p class="muted">Anyone can run an agent from the Tacit CLI. It needs no funds: it only holds key shares and cosigns.</p>
-        <pre class="cmd">tacit --network test init \\
-  --server https://testnet.zec.rocks:443 \\
-  --coordinator ${esc(location.origin)}
-tacit --network test agent \\
-  --role arbiter --name "My arbiter"</pre>
-        <p class="faint" style="font-size:13px;margin:12px 0 0">Arbiters rule on escrow disputes with <span class="mono">tacit decide &lt;room&gt;</span>.</p>
+        <h2>Become an arbiter</h2>
+        <p class="muted">Two commands on any Linux machine or server. An agent needs no funds: it only holds key shares and cosigns what the rules allow, so running one makes every market it joins more trustworthy.</p>
+        <pre class="cmd">curl -L -o tacit https://github.com/angelraph/tacit/releases/latest/download/tacit-linux-x86_64
+chmod +x tacit
+./tacit --network ${net} init --server ${esc(lwd)} \\
+  --coordinator ${esc(gw)}
+./tacit --network ${net} agent --role arbiter \\
+  --name "My arbiter" --run-by "Your name"</pre>
+        <p class="faint" style="font-size:13px;margin:12px 0 0">It appears in this list within a minute, and sellers can pick it. Arbiters rule on escrow disputes with <span class="mono">./tacit decide &lt;room&gt;</span>.</p>
       </div>
     </div>`;
   reveals(view);
@@ -54,13 +58,61 @@ tacit --network test agent \\
     view.querySelector("#agent-list").innerHTML = agents.length
       ? agents
           .map(
-            (a) => `<div class="agent-row"><span class="avatar">${esc(a.name.trim()[0] || "A").toUpperCase()}</span><div style="flex:1;min-width:0"><b>${esc(a.name)}</b><div class="faint mono" style="font-size:12px;overflow:hidden;text-overflow:ellipsis">${a.seat}</div></div><span class="badge ${a.role === "operator" ? "sealed" : "settled"}">${a.role}</span><span class="faint hide-sm" style="font-size:12.5px;min-width:70px;text-align:right">${ago(now - a.seen)} ago</span></div>`,
+            (a) => `<div class="agent-row"><span class="avatar">${esc(a.name.trim()[0] || "A").toUpperCase()}</span><div style="flex:1;min-width:0"><b>${esc(a.name)}</b> <span class="faint" style="font-size:13px">run by ${esc(a.run_by || "unnamed")}</span><div class="faint mono" style="font-size:12px;overflow:hidden;text-overflow:ellipsis">${a.seat}</div></div><span class="badge ${a.role === "operator" ? "sealed" : "settled"}">${a.role}</span><span class="faint hide-sm" style="font-size:12.5px;min-width:70px;text-align:right">${ago(now - a.seen)} ago</span></div>`,
           )
           .join("")
       : `<p class="empty">No agents online right now.</p>`;
   } catch {
     view.querySelector("#agent-list").innerHTML = `<p class="empty">The coordinator is offline.</p>`;
   }
+}
+
+// Every auction this coordinator has seen, audited from public data alone.
+export async function renderProof(ctx) {
+  const { api, esc, zec, unit, short, ago, S, netName } = ctx;
+  const view = document.getElementById("view");
+  view.innerHTML = `
+    <div class="page-head reveal"><span class="eyebrow">Proof</span><h1>Every market, <span class="dim">audited in public</span></h1><p>Each auction below is audited from its published terms, public chain data and the drand beacon, by the same code that runs when you press "Run audit in this tab". Don't take this page's word for it: open any auction and audit it yourself.</p></div>
+    <div id="proof-body"><div class="progress spin" style="margin:30px 0"><i></i></div></div>`;
+  reveals(view);
+  let p;
+  try {
+    p = await api("/v1/proof");
+  } catch (e) {
+    view.querySelector("#proof-body").innerHTML = `<p class="empty">The coordinator didn't answer: ${esc(e.message)}</p>`;
+    return;
+  }
+  const now = Date.now() / 1000;
+  const badge = (v) =>
+    ({
+      honest: '<span class="badge settled">settled honestly</span>',
+      mismatch: '<span class="badge bad">mismatch</span>',
+      awaiting_settlement: '<span class="badge open">unsealed</span>',
+      open: '<span class="badge sealed">bidding / sealed</span>',
+    })[v] || '<span class="badge">auditing</span>';
+  view.querySelector("#proof-body").innerHTML = `
+    <div class="big-stats reveal">
+      <div><b>${p.auctions}</b><span>auctions on ${esc(netName(S.net))}</span></div>
+      <div><b>${p.sealed_bids}</b><span>sealed bids</span></div>
+      <div><b>${p.settled_honestly}</b><span>settled honestly</span></div>
+      <div><b>${zec(p.bonded)}</b><span>${unit()} bonded</span></div>
+      <div><b>${p.mismatches}</b><span>mismatches</span></div>
+    </div>
+    <div class="table-card reveal" style="margin-top:22px">
+      <div class="table-tools"><b>Auction ledger</b><span class="total-pill">re-audited every 2 minutes</span></div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Lot</th><th>Verdict</th><th class="num">Bids</th><th class="num">Price</th><th class="hide-sm">Settlement</th><th class="hide-sm">Audited</th></tr></thead>
+        <tbody>${
+          p.rows.length
+            ? p.rows
+                .map(
+                  (r) => `<tr><td><a href="#/auction/${r.id}">${esc(r.item || short(r.id, 6))}</a></td><td>${badge(r.verdict)}</td><td class="num">${r.deposits}</td><td class="num">${r.price != null ? `${zec(r.price)} ${unit()}` : "–"}</td><td class="hide-sm mono faint">${r.settlement ? short(r.settlement, 8) : "–"}</td><td class="hide-sm faint">${r.audited ? `${ago(now - r.audited)} ago` : "pending"}</td></tr>`,
+                )
+                .join("")
+            : `<tr><td colspan="6" class="faint">No auctions yet.</td></tr>`
+        }</tbody></table></div>
+    </div>`;
+  reveals(view);
 }
 
 export function renderTerms() {

@@ -132,6 +132,48 @@ impl Chain {
         });
     }
 
+    /// Current tip height.
+    pub async fn tip(&self) -> Result<u64, String> {
+        let t = self.client.clone().get_latest_block(ChainSpec::default()).await.map_err(|e| e.message().to_string())?;
+        let h = t.into_inner().height;
+        self.tip.fetch_max(h, Ordering::Relaxed);
+        Ok(h)
+    }
+
+    pub async fn tree_state(&self, height: u64) -> Result<Tree, String> {
+        let ts = self
+            .client
+            .clone()
+            .get_tree_state(BlockId { height, hash: vec![] })
+            .await
+            .map_err(|e| e.message().to_string())?
+            .into_inner();
+        Ok(Tree { height: ts.height, hash: ts.hash, time: ts.time, ironwood_tree: ts.ironwood_tree })
+    }
+
+    /// A block range as the gateway's JSON, from the cache when it can.
+    pub async fn blocks_json(&self, from: u64, to: u64) -> Result<String, String> {
+        if let Some(body) = self.cached(from, to) {
+            return Ok(body);
+        }
+        let blocks = fetch(&mut self.client.clone(), from, to).await.map_err(|e| e.message().to_string())?;
+        self.store(&blocks);
+        serde_json::to_string(&blocks).map_err(|e| e.to_string())
+    }
+
+    pub async fn raw_tx(&self, txid: &str) -> Result<RawTx, String> {
+        let mut hash = hex::decode(txid).map_err(|_| "txid is not hex".to_string())?;
+        hash.reverse();
+        let raw = self
+            .client
+            .clone()
+            .get_transaction(TxFilter { block: None, index: 0, hash })
+            .await
+            .map_err(|e| e.message().to_string())?
+            .into_inner();
+        Ok(RawTx { height: raw.height, data: hex::encode(raw.data) })
+    }
+
     /// The range as a JSON array, if every block in it is cached.
     fn cached(&self, from: u64, to: u64) -> Option<String> {
         let db = self.cache.as_ref()?.lock().unwrap();

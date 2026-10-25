@@ -76,6 +76,11 @@ enum Cmd {
         /// Name shown to sellers choosing seats.
         #[arg(long, default_value = "Tacit agent")]
         name: String,
+        /// Who runs this agent (you, or your organisation). Sellers pair an
+        /// operator and an arbiter run by different people, so that no single
+        /// party holds two of a vault's three key shares.
+        #[arg(long, default_value = "independent")]
+        run_by: String,
     },
     /// Run a testnet faucet that drips this home's coins to anyone, at most
     /// once a day per address and per IP. The coordinator relays it.
@@ -218,7 +223,7 @@ async fn run(cli: Cli) -> Result<()> {
         Cmd::Vault(c) => vault::run(&home, c).await,
         Cmd::Auction(c) => market::run(&home, c).await,
         Cmd::Bid { auction, amount } => market::bid(&home, &auction, &amount).await,
-        Cmd::Agent { role, name } => agent::run(&home, role, name).await,
+        Cmd::Agent { role, name, run_by } => agent::run(&home, role, name, run_by).await,
         Cmd::Decide { room } => agent::decide(&home, &room).await,
         Cmd::Faucet { listen, amount } => faucet::run(&home, listen, amount).await,
     }
