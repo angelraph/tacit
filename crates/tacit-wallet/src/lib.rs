@@ -278,6 +278,18 @@ impl<P: Parameters + Clone + Send + Sync + 'static> Wallet<P> {
             .unwrap_or(0))
     }
 
+    /// Everything the account holds, including change and deposits that are
+    /// still waiting for a confirmation.
+    pub fn total(&self, account: AccountUuid) -> Result<u64, WalletError> {
+        let summary = self
+            .db
+            .get_wallet_summary(ConfirmationsPolicy::MIN)
+            .map_err(db_err)?;
+        Ok(summary
+            .and_then(|s| s.account_balances().get(&account).map(|b| b.total().into_u64()))
+            .unwrap_or(0))
+    }
+
     pub async fn sync(
         &mut self,
         client: &mut CompactTxStreamerClient<Channel>,

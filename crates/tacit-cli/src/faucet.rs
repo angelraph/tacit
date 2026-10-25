@@ -45,6 +45,8 @@ struct Status {
     /// into Ironwood automatically.
     deposit_address: String,
     balance: u64,
+    /// Change and deposits still waiting for a confirmation.
+    pending: u64,
     drip: u64,
     drips: u64,
     synced_height: u32,
@@ -82,6 +84,7 @@ pub async fn run(home: &Home, listen: String, amount: String) -> Result<()> {
             address: address.clone(),
             deposit_address: deposit_address.clone(),
             balance: 0,
+            pending: 0,
             drip,
             drips: ledger.drips,
             synced_height: 0,
@@ -132,7 +135,7 @@ async fn worker(
             Ok(Some(j)) => Some(j),
             Err(_) => None,
         };
-        let res: Result<(String, u64, u32)> = async {
+        let res: Result<(String, u64, u64, u32)> = async {
             let mut client = home.client().await?;
             let (mut wallet, account) = home.personal()?;
             if job.is_some() || last_sync.elapsed() > Duration::from_secs(50) {
@@ -150,14 +153,17 @@ async fn worker(
                 let pczt = sign_with_usk(prove(pczt, &pk)?, &usk)?;
                 txid = wallet.finish_and_send(&mut client, pczt).await?.to_string();
             }
-            Ok((txid, wallet.spendable(account)?, wallet.synced_height()?.unwrap_or(0)))
+            let spendable = wallet.spendable(account)?;
+            let total = wallet.total(account)?;
+            Ok((txid, spendable, total.saturating_sub(spendable), wallet.synced_height()?.unwrap_or(0)))
         }
         .await;
         match res {
-            Ok((txid, balance, height)) => {
+            Ok((txid, balance, pending, height)) => {
                 {
                     let mut s = shared.status.lock().unwrap();
                     s.balance = balance;
+                    s.pending = pending;
                     s.synced_height = height;
                 }
                 if let Some((_, reply)) = job {
@@ -226,12 +232,17 @@ async fn drip_handler(
             ));
         }
     }
-    let (balance, drip) = {
+    let (balance, pending, drip) = {
         let st = s.status.lock().unwrap();
-        (st.balance, st.drip)
+        (st.balance, st.pending, st.drip)
     };
     if balance < drip + 20_000 {
-        return Err(refuse(StatusCode::SERVICE_UNAVAILABLE, "the faucet is empty right now. Donations welcome at its address"));
+        let msg = if balance + pending >= drip + 20_000 {
+            "the faucet's last payment is still confirming. Try again in a minute"
+        } else {
+            "the faucet is empty right now. Donations welcome at its address"
+        };
+        return Err(refuse(StatusCode::SERVICE_UNAVAILABLE, msg));
     }
     let (tx, rx) = oneshot::channel();
     s.jobs

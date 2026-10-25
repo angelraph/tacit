@@ -538,7 +538,10 @@ async function renderAuction(m, token) {
 
   const draw = () => {
     const p = phase(terms, S.info && S.info.tip);
-    view.querySelector("#phase-badge").outerHTML = `<span id="phase-badge" class="badge ${p.key}">${p.label}</span>`;
+    const settled = S.settled && S.settled[id];
+    view.querySelector("#phase-badge").outerHTML = settled
+      ? `<span id="phase-badge" class="badge settled">Settled</span>`
+      : `<span id="phase-badge" class="badge ${p.key}">${p.label}</span>`;
     const left = Math.max(0, terms.bids_until_height - (S.info ? S.info.tip : 0));
     view.querySelector("#bs-left").textContent = left ? `${left} blocks left` : "bidding closed";
     view.querySelector("#bs-unseal").innerHTML = p.key === "open" ? "Now" : dimUnit(ago(p.opensAt - Date.now() / 1000));
@@ -782,7 +785,13 @@ async function runAudit(terms, id) {
     const r = await call("audit", { terms, beacon: b }, onProgress);
     const secs = ((performance.now() - t0) / 1000).toFixed(1);
     S.settled = S.settled || {};
-    if (r.verdict === "honest") S.settled[id] = true;
+    if (r.verdict === "honest") {
+      S.settled[id] = true;
+      const badge = view.querySelector("#phase-badge");
+      if (badge) badge.outerHTML = `<span id="phase-badge" class="badge settled">Settled</span>`;
+      const steps = [...view.querySelectorAll("#timeline .step")];
+      steps.forEach((s, i) => (s.className = `step ${i < steps.length - 1 ? "done" : "now"}`));
+    }
     out.innerHTML = auditHtml(r, terms, b, secs);
   } catch (e) {
     out.innerHTML = `<p class="notice bad">${esc(e.message)}</p>`;
@@ -877,8 +886,14 @@ async function renderFaucet(_, token) {
         ${
           st
             ? `<dl class="kv">
-                <dt>Status</dt><dd>${st.balance >= st.drip + 20000 ? '<span class="badge settled">Pouring</span>' : '<span class="badge sealed">Needs a refill</span>'}</dd>
-                <dt>Balance</dt><dd>${zec(st.balance)} ${unit()}</dd>
+                <dt>Status</dt><dd>${
+                  st.balance >= st.drip + 20000
+                    ? '<span class="badge settled">Pouring</span>'
+                    : st.balance + (st.pending || 0) >= st.drip + 20000
+                      ? '<span class="badge bidding">Refilling, back in a minute</span>'
+                      : '<span class="badge sealed">Needs a refill</span>'
+                }</dd>
+                <dt>Balance</dt><dd>${zec(st.balance + (st.pending || 0))} ${unit()}${st.pending ? ` <span class="faint">(${zec(st.pending)} confirming)</span>` : ""}</dd>
                 <dt>Per drip</dt><dd>${zec(st.drip)} ${unit()}</dd>
                 <dt>Drips sent</dt><dd>${st.drips}</dd>
                 <dt>Synced to</dt><dd>block ${Number(st.synced_height).toLocaleString()}</dd>
