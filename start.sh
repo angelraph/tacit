@@ -39,7 +39,7 @@ for role in operator arbiter; do
     /app/bin/tacit --network "$NET" --home "$home" init --server "$TACIT_LIGHTWALLETD" --coordinator "$COORD"
   fi
   name="Tacit $role"
-  /app/bin/tacit --network "$NET" --home "$home" agent --role "$role" --name "$name" &
+  /app/bin/tacit --network "$NET" --home "$home" agent --role "$role" --name "$name" --run-by Tacit &
 done
 
 # If any process dies, exit so the platform restarts the container.

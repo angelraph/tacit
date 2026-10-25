@@ -52,7 +52,7 @@ async function renderHome(ctx) {
           <div class="tabs" id="role"><button class="on" data-r="buyer">I'm buying</button><button data-r="seller">I'm selling</button></div>
           <label class="field"><span>What is it for?</span><input id="item" maxlength="256" placeholder="e.g. Logo design, 3 concepts" /></label>
           <label class="field"><span>Price</span><div class="input-suffix"><input id="amount" inputmode="decimal" placeholder="0.5" /><b>${unit()}</b></div></label>
-          <label class="field"><span>Arbiter</span><select id="arb">${arbiters.map((a) => `<option value="${a.seat}">${esc(a.name)} · ${a.seat.slice(0, 8)}</option>`).join("") || `<option value="">none online</option>`}</select></label>
+          <label class="field"><span>Arbiter</span><select id="arb">${arbiters.map((a) => `<option value="${a.seat}">${esc(a.name)} · run by ${esc(a.run_by || "unnamed")} · ${a.seat.slice(0, 8)}</option>`).join("") || `<option value="">none online</option>`}</select></label>
           <button class="btn primary" id="go">Create invite link</button>
         </div>
         <div id="invite"></div>
