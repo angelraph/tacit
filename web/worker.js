@@ -4,8 +4,9 @@
 
 let tacit = null;
 let wallet = null;
-// A proved bid waiting for the bidder's go-ahead (prover worker only).
-let pendingBid = null;
+// Proved bids waiting for the bidder's go-ahead, by ticket (prover worker only).
+const pendingBids = new Map();
+let pendingSeq = 0;
 let phrase = null;
 let gateway = "";
 let proverReady = false;
@@ -213,19 +214,22 @@ const methods = {
   async prepareBid({ terms, amount, refundIndex, phrase: p, saved }, id) {
     if (saved) wallet = tacit.Wallet.load(p, saved);
     if (!wallet) throw new Error("no wallet open");
-    pendingBid = null;
     await catchUp(id, wallet, "Syncing wallet");
     progress(id, { label: "Sealing your bid and proving the deposit", spin: true });
     const t = performance.now();
     const built = wallet.bid(JSON.stringify(terms), BigInt(amount), refundIndex);
-    pendingBid = { built, proveMs: performance.now() - t };
-    return { proveMs: pendingBid.proveMs };
+    // Each proof is kept under its own ticket, so a second "Seal and deposit"
+    // can't replace the one the bidder is confirming.
+    const ticket = ++pendingSeq;
+    pendingBids.set(ticket, { built, proveMs: performance.now() - t });
+    return { ticket, proveMs: pendingBids.get(ticket).proveMs };
   },
 
-  async broadcastBid(_, id) {
-    if (!pendingBid) throw new Error("nothing to send; place the bid again");
-    const { built, proveMs } = pendingBid;
-    pendingBid = null;
+  async broadcastBid({ ticket }, id) {
+    const pending = pendingBids.get(ticket);
+    if (!pending) throw new Error("this bid's proof is gone; place the bid again");
+    const { built, proveMs } = pending;
+    pendingBids.clear();
     progress(id, { label: "Broadcasting", spin: true });
     const tx = JSON.parse(built);
     await api("/v1/chain/tx", {
@@ -237,8 +241,8 @@ const methods = {
     return { txid: tx.txid, fee: tx.fee, proveMs, saved: wallet.save(), state: walletState() };
   },
 
-  dropBid() {
-    pendingBid = null;
+  dropBid({ ticket }) {
+    pendingBids.delete(ticket);
     return true;
   },
 

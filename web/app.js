@@ -801,15 +801,17 @@ async function placeBid(terms, id, amount) {
     <p class="muted">Your bid is encrypted to drand round ${terms.close_round} and travels inside a shielded memo. Nobody can read it before then. Once you send it, you can't change or cancel it.</p>
     <p class="faint" id="pv" style="font-size:13px"><span class="spinner" style="display:inline-block;vertical-align:middle"></span> Proving in the background so sending is instant. Nothing is sent until you confirm.</p>
     <div class="row"><span class="spacer"></span><button class="btn ghost" data-close id="cancel-bid">Cancel</button><button class="btn primary" id="go">Seal and send</button></div>`);
-  c.querySelector("#cancel-bid").addEventListener("click", () => prepared.finally(() => prove("dropBid").catch(() => {})));
+  c.querySelector("#cancel-bid").addEventListener("click", () =>
+    prepared.then((p) => prove("dropBid", { ticket: p.ticket })).catch(() => {}),
+  );
   c.querySelector("#go").onclick = async () => {
     c.close();
     const b = busy("Placing your sealed bid");
     try {
       follow = b.onProgress;
       b.onProgress(last || { label: "Starting the prover", spin: true });
-      await prepared;
-      const r = await prove("broadcastBid", {}, b.onProgress);
+      const { ticket } = await prepared;
+      const r = await prove("broadcastBid", { ticket }, b.onProgress);
       saveScan(r.saved);
       S.wallet = await call("openWallet", { phrase: S.phrase, saved: r.saved });
       addBid({ auction: id, item: terms.item, amount, txid: r.txid, refundIndex, time: Date.now() });
