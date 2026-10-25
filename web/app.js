@@ -2,7 +2,7 @@
 // drand and the WebAssembly worker that holds the keys.
 
 import {
-  call, prove, api, beacon, roundTime, gatewayUrl, setGatewayUrl, safeGet, safeSet,
+  call, prove, api, postJson, beacon, roundTime, gatewayUrl, setGatewayUrl, safeGet, safeSet,
   sealPhrase, openPhrase, zec, parseZec, short, ago, esc, h, toast, copy, qrSvg,
   detectExtension, extConnect, extBalance, extSend, EXTENSIONS,
 } from "./lib.js";
@@ -266,6 +266,7 @@ const routes = [
   [/^\/escrow(?:\/(.*))?$/, (m) => renderEscrow(m, ctx), "escrow"],
   [/^\/wallet$/, renderWallet, "wallet"],
   [/^\/fund$/, (m) => renderFund(m, ctx), "wallet"],
+  [/^\/faucet$/, renderFaucet, "faucet"],
   [/^\/how$/, renderHow, "explore"],
   [/^\/faq$/, renderFaq, "explore"],
   [/^\/agents$/, () => renderAgents(ctx), "explore"],
@@ -832,6 +833,89 @@ export async function needWallet() {
   if (S.wallet) return true;
   location.hash = "#/wallet";
   return false;
+}
+
+// Tacit's testnet faucet as a page of its own: anyone can paste a shielded
+// testnet address and get coins, with or without a Tacit wallet.
+async function renderFaucet(_, token) {
+  await S.ready;
+  await refreshChain();
+  if (!S.info) {
+    view.innerHTML = offline();
+    return;
+  }
+  if (S.net === "main") {
+    view.innerHTML = `<div class="panel" style="max-width:560px;margin:40px auto"><h2>No faucet on mainnet</h2><p class="muted">Real ZEC doesn't come from a tap. <a href="#/fund">Fund from another chain</a> instead.</p></div>`;
+    return;
+  }
+  let st = null;
+  try {
+    st = await api("/v1/faucet/status");
+  } catch {}
+  if (!current(token)) return;
+  const mine = S.wallet ? S.wallet.address : "";
+  view.innerHTML = `
+    <section class="page-head" style="max-width:760px">
+      <span class="eyebrow">${netName(S.net)} faucet</span>
+      <h1>Free ${unit()}, <span class="dim">straight to a shielded address</span></h1>
+      <p class="muted">Test coins for trying Tacit: bid, sell, open an escrow. They have no value. One drip per address and per connection each day.</p>
+    </section>
+    <div class="split">
+      <div class="panel">
+        <h2>Get ${unit()}</h2>
+        <label class="field"><span>Your shielded testnet address</span><textarea id="fa" rows="3" placeholder="utest1…">${esc(mine)}</textarea></label>
+        <div class="row" style="margin-top:10px;flex-wrap:wrap">
+          <button class="btn primary" id="fgo" ${st ? "" : "disabled"}>Send me ${st ? zec(st.drip) : ""} ${unit()}</button>
+          ${S.wallet ? "" : `<a class="btn" href="#/wallet">Create a Tacit wallet first</a>`}
+          ${EXT ? `<button class="btn" id="fext">Use my ${esc(EXT.name)} address</button>` : ""}
+        </div>
+        <div id="fout"></div>
+        <p class="faint" style="font-size:13px;margin:14px 0 0">Tacit runs on Zcash's Ironwood pool, so use an address with an Ironwood receiver, like the one your Tacit wallet shows.</p>
+      </div>
+      <div class="panel">
+        <h2>Faucet</h2>
+        ${
+          st
+            ? `<dl class="kv">
+                <dt>Status</dt><dd>${st.balance >= st.drip + 20000 ? '<span class="badge settled">Pouring</span>' : '<span class="badge sealed">Needs a refill</span>'}</dd>
+                <dt>Balance</dt><dd>${zec(st.balance)} ${unit()}</dd>
+                <dt>Per drip</dt><dd>${zec(st.drip)} ${unit()}</dd>
+                <dt>Drips sent</dt><dd>${st.drips}</dd>
+                <dt>Synced to</dt><dd>block ${Number(st.synced_height).toLocaleString()}</dd>
+              </dl>
+              <h3 style="margin:18px 0 6px;font-size:15px">Top it up</h3>
+              <p class="muted" style="font-size:14px">Spare ${unit()}? Send it to the shielded address, or to the transparent one (it shields deposits itself).</p>
+              <div class="addr" style="font-size:12px">${esc(st.address)}</div>
+              <div class="addr" style="font-size:12px;margin-top:8px">${esc(st.deposit_address)}</div>`
+            : `<p class="muted">This coordinator doesn't run a faucet right now.</p>`
+        }
+      </div>
+    </div>`;
+  const fext = view.querySelector("#fext");
+  if (fext)
+    fext.onclick = async () => {
+      try {
+        view.querySelector("#fa").value = (await extConnect(EXT)).shielded;
+      } catch (e) {
+        toast(e.message || String(e), "error");
+      }
+    };
+  const go = view.querySelector("#fgo");
+  go.onclick = async () => {
+    const address = view.querySelector("#fa").value.trim();
+    if (!address) return toast("Paste a shielded testnet address", "error");
+    go.disabled = true;
+    const out = view.querySelector("#fout");
+    out.innerHTML = `<p class="muted" style="margin:12px 0 0"><span class="spinner" style="display:inline-block;vertical-align:middle"></span> Building a shielded payment. This takes up to a minute.</p>`;
+    try {
+      const r = await postJson("/v1/faucet/drip", { address });
+      out.innerHTML = `<div class="notice good" style="margin-top:12px">${zec(r.amount)} ${unit()} sent. It arrives after the next block, about 25 seconds.</div><div class="faint mono" style="font-size:12px;margin-top:8px">${esc(r.txid)}</div>`;
+      if (S.wallet && address === S.wallet.address) setTimeout(() => syncWallet(true), 40000);
+    } catch (e) {
+      out.innerHTML = `<div class="notice warn" style="margin-top:12px">${esc(e.message)}</div>`;
+      go.disabled = false;
+    }
+  };
 }
 
 async function renderWallet(_, token) {
