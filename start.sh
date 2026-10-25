@@ -9,6 +9,11 @@ export TACIT_LIGHTWALLETD="${TACIT_LIGHTWALLETD:-https://testnet.zec.rocks:443}"
 export TACIT_WEB=/app/web
 export TACIT_DB="$DATA/coordinator.sqlite"
 export PORT="${PORT:-8080}"
+# The gateway caches blocks so wallet restores don't crawl through the public
+# lightwalletd. Testnet is heavy, so cache only its recent stretch.
+if [ "$NET" != "main" ]; then
+  export TACIT_CACHE_FROM="${TACIT_CACHE_FROM:-4450000}"
+fi
 mkdir -p "$DATA"
 
 # The testnet faucet: a wallet that drips TAZ to anyone who asks from the app.

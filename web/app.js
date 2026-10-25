@@ -253,6 +253,25 @@ export async function proveWith(method, args, onProgress) {
   return r;
 }
 
+// Brings the open wallet to the tip. A long gap (a restore, or a wallet
+// left alone for days) goes to the threaded worker, which trial-decrypts on
+// every core; short ones stay in the wallet worker. Saves the result.
+async function catchUpWallet(onProgress) {
+  const threads = self.crossOriginIsolated && typeof SharedArrayBuffer !== "undefined";
+  const gap = S.info && S.wallet ? S.info.tip - S.wallet.height : 0;
+  let r;
+  if (threads && gap > 2000) {
+    await prove("init", { threads, gatewayUrl: gatewayUrl() });
+    r = await prove("syncSaved", { phrase: S.phrase, saved: storedWallet().saved }, onProgress);
+    r.state = await call("openWallet", { phrase: S.phrase, saved: r.saved });
+  } else {
+    r = await call("sync", {}, onProgress);
+  }
+  saveScan(r.saved);
+  S.wallet = r.state;
+  return r;
+}
+
 export async function syncWallet(quiet) {
   if (!S.wallet) return;
   try {
@@ -797,7 +816,7 @@ async function placeBid(terms, id, amount) {
       b.close();
       modal(`
         <h2>Bid sealed and sent</h2>
-        <p class="notice good">Your ${zec(terms.bond)} ${unit()} bond is on its way to the vault. It was proved in ${(r.proveMs / 1000).toFixed(1)} s right here in your browser, while you confirmed.</p>
+        <p class="notice good">Your ${zec(terms.bond)} ${unit()} bond is on its way to the vault. It was proved in ${(r.proveMs / 1000).toFixed(1)} s right here in your browser.</p>
         <p class="faint" style="margin-top:12px;font-size:13px">Transaction</p><div class="addr">${esc(r.txid)}</div>
         <div class="row" style="margin-top:16px"><span class="spacer"></span><button class="btn primary" data-close>Done</button></div>`);
       route();
@@ -1107,9 +1126,7 @@ async function renderWallet(_, token) {
   view.querySelector("#sync").onclick = async () => {
     const b = busy("Syncing");
     try {
-      const r = await call("sync", {}, b.onProgress);
-      saveScan(r.saved);
-      S.wallet = r.state;
+      await catchUpWallet(b.onProgress);
       b.close();
       route();
     } catch (e) {
@@ -1176,9 +1193,7 @@ function renderUnlock(rec, token) {
       S.wallet = await call("openWallet", { phrase, saved: rec.saved });
       const b = busy("Catching up");
       try {
-        const r = await call("sync", {}, b.onProgress);
-        saveScan(r.saved);
-        S.wallet = r.state;
+        await catchUpWallet(b.onProgress);
       } catch (e) {
         toast(e.message, "error");
       }
@@ -1247,7 +1262,7 @@ function renderOnboard(token) {
     const m = modal(`
       <h2>Restore a wallet</h2>
       <label class="field"><span>Recovery phrase</span><textarea id="ph" placeholder="12 or 24 words"></textarea></label>
-      <label class="field" style="margin-top:12px"><span>Scan from block (the block the wallet was made, or earlier)</span><input id="bh" inputmode="numeric" placeholder="${S.info.tip - 1000}" /></label>
+      <label class="field" style="margin-top:12px"><span>Scan from block (when the wallet first got Ironwood funds; leave empty for a new wallet)</span><input id="bh" inputmode="numeric" placeholder="${S.info.tip - 1000}" /></label>
       <label class="field" style="margin-top:12px"><span>New passcode for this browser</span><input id="p1" type="password" autocomplete="new-password" /></label>
       <div class="row" style="margin-top:16px"><span class="spacer"></span><button class="btn ghost" data-close>Cancel</button><button class="btn primary" id="go">Restore</button></div>`);
     m.querySelector("#go").onclick = async () => {
@@ -1257,7 +1272,9 @@ function renderOnboard(token) {
       if (pass.length < 6) return toast("Use a passcode of at least 6 characters", "error");
       const bh = parseInt(m.querySelector("#bh").value, 10);
       m.close();
-      await createWallet(phrase, pass, Number.isFinite(bh) ? Math.max(1, bh - 1) : Math.max(1, S.info.tip - 1000), token);
+      // Tacit only holds Ironwood notes, so nothing before Ironwood matters.
+      const ironwood = { main: 3428143, test: 4134000 }[S.net] || 1;
+      await createWallet(phrase, pass, Number.isFinite(bh) ? Math.max(ironwood, bh - 1) : Math.max(1, S.info.tip - 1000), token);
     };
   };
 }
@@ -1271,11 +1288,8 @@ async function createWallet(phrase, pass, birthday, token) {
     S.phrase = phrase;
     safeSet(`tacit.seats.${S.net}`, null);
     S.wallet = r.state;
-    if (birthday != null) {
-      const s = await call("sync", {}, b.onProgress);
-      saveScan(s.saved);
-      S.wallet = s.state;
-    }
+    // Restoring scans every block since the birthday.
+    if (birthday != null) await catchUpWallet(b.onProgress);
     b.close();
     warmProver().catch(() => {});
     toast("Wallet ready", "good");
