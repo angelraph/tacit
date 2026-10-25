@@ -40,7 +40,7 @@ export const FAQ = [
   },
   {
     q: "How do I get testnet coins?",
-    a: `<p>Open the wallet on testnet and press "Get free TAZ". Tacit's own faucet sends test coins straight to your shielded address, once a day per address. The faucet refills from donations to its transparent address, which it shields automatically.</p>`,
+    a: `<p>Open the Faucet page (it's in the top menu), paste a shielded testnet address or use your Tacit wallet's, and press send. Tacit's own faucet sends test coins straight to that address, once a day per address. The wallet's "Get free TAZ" button does the same in one tap. The faucet refills from donations to its transparent address, which it shields automatically.</p>`,
   },
   {
     q: "Can I install Tacit like an app?",
