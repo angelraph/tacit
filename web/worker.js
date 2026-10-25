@@ -4,11 +4,15 @@
 
 let tacit = null;
 let wallet = null;
+// A proved bid waiting for the bidder's go-ahead (prover worker only).
+let pendingBid = null;
 let phrase = null;
 let gateway = "";
 let proverReady = false;
 
-const BATCH = 400;
+// Small enough that progress moves on a busy chain, large enough to keep
+// requests few on a quiet one.
+const BATCH = 100;
 
 async function api(path, init) {
   const res = await fetch(gateway + path, init);
@@ -51,7 +55,9 @@ function walletState() {
   };
 }
 
-// Scans from a scanner's height to the chain tip in batches.
+// Scans from a scanner's height to the chain tip in batches. The scanner
+// skips the tree's hashing unless a block pays it; then it stops and asks
+// for the tree state there, and the scan picks up from that block.
 async function catchUp(id, scanner, label) {
   const info = await api("/v1/chain/info");
   const start = scanner.height();
@@ -59,8 +65,14 @@ async function catchUp(id, scanner, label) {
   while (h < info.tip) {
     const to = Math.min(info.tip, h + BATCH);
     const blocks = await getText(`/v1/chain/blocks?from=${h + 1}&to=${to}`);
-    scanner.scan(blocks);
-    h = to;
+    try {
+      scanner.scan(blocks);
+    } catch (e) {
+      const need = /need the tree state at block (\d+)/.exec(e && e.message);
+      if (!need) throw e;
+      scanner.setTree(await getText(`/v1/chain/tree/${need[1]}`));
+    }
+    h = scanner.height();
     progress(id, { label, done: h - start, total: info.tip - start, height: h, tip: info.tip });
   }
   return info;
@@ -158,6 +170,41 @@ const methods = {
     });
     wallet.sent(built);
     return { txid: tx.txid, fee: tx.fee, proveMs, saved: wallet.save(), state: walletState() };
+  },
+
+  // The same bid in two steps, so proving can run while the bidder reads the
+  // confirmation: prepareBid proves and holds the transaction, broadcastBid
+  // sends it. Nothing leaves the tab until broadcastBid.
+  async prepareBid({ terms, amount, refundIndex, phrase: p, saved }, id) {
+    if (saved) wallet = tacit.Wallet.load(p, saved);
+    if (!wallet) throw new Error("no wallet open");
+    pendingBid = null;
+    await catchUp(id, wallet, "Syncing wallet");
+    progress(id, { label: "Sealing your bid and proving the deposit", spin: true });
+    const t = performance.now();
+    const built = wallet.bid(JSON.stringify(terms), BigInt(amount), refundIndex);
+    pendingBid = { built, proveMs: performance.now() - t };
+    return { proveMs: pendingBid.proveMs };
+  },
+
+  async broadcastBid(_, id) {
+    if (!pendingBid) throw new Error("nothing to send; place the bid again");
+    const { built, proveMs } = pendingBid;
+    pendingBid = null;
+    progress(id, { label: "Broadcasting", spin: true });
+    const tx = JSON.parse(built);
+    await api("/v1/chain/tx", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ data: tx.data }),
+    });
+    wallet.sent(built);
+    return { txid: tx.txid, fee: tx.fee, proveMs, saved: wallet.save(), state: walletState() };
+  },
+
+  dropBid() {
+    pendingBid = null;
+    return true;
   },
 
   async send({ to, amount, memo, phrase: p, saved }, id) {

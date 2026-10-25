@@ -81,6 +81,10 @@ export class VaultSeat {
      */
     propose(secret: string, room: string, to: string, cosigner: number): bigint;
     scan(blocks: string): void;
+    /**
+     * The tree state a scan asked for ("need the tree state at block N").
+     */
+    setTree(tree: string): void;
     spent(): string | undefined;
     start(): string;
     /**
@@ -137,6 +141,10 @@ export class Wallet {
      * twice before it is mined.
      */
     sent(built: string): void;
+    /**
+     * The tree state a scan asked for ("need the tree state at block N").
+     */
+    setTree(tree: string): void;
     /**
      * Spendable balance in zatoshi (not counting notes a pending
      * transaction spends).
@@ -262,6 +270,7 @@ export interface InitOutput {
     readonly vaultseat_new: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
     readonly vaultseat_propose: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [bigint, number, number];
     readonly vaultseat_scan: (a: number, b: number, c: number) => [number, number];
+    readonly vaultseat_setTree: (a: number, b: number, c: number) => [number, number];
     readonly vaultseat_spent: (a: number) => [number, number];
     readonly vaultseat_start: (a: number) => [number, number];
     readonly vaultseat_step: (a: number, b: number, c: number) => [number, number, number, number];
@@ -279,6 +288,7 @@ export interface InitOutput {
     readonly wallet_scan: (a: number, b: number, c: number) => [number, number];
     readonly wallet_send: (a: number, b: number, c: number, d: bigint, e: number, f: number) => [number, number, number, number];
     readonly wallet_sent: (a: number, b: number, c: number) => [number, number];
+    readonly wallet_setTree: (a: number, b: number, c: number) => [number, number];
     readonly wallet_spendable: (a: number) => bigint;
     readonly warmProver: () => void;
     readonly wbg_rayon_poolbuilder_build: (a: number) => void;

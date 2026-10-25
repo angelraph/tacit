@@ -336,6 +336,18 @@ export class VaultSeat {
         }
     }
     /**
+     * The tree state a scan asked for ("need the tree state at block N").
+     * @param {string} tree
+     */
+    setTree(tree) {
+        const ptr0 = passStringToWasm0(tree, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.vaultseat_setTree(this.__wbg_ptr, ptr0, len0);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
      * @returns {string | undefined}
      */
     spent() {
@@ -611,6 +623,18 @@ export class Wallet {
         const ptr0 = passStringToWasm0(built, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len0 = WASM_VECTOR_LEN;
         const ret = wasm.wallet_sent(this.__wbg_ptr, ptr0, len0);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * The tree state a scan asked for ("need the tree state at block N").
+     * @param {string} tree
+     */
+    setTree(tree) {
+        const ptr0 = passStringToWasm0(tree, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.wallet_setTree(this.__wbg_ptr, ptr0, len0);
         if (ret[1]) {
             throw takeFromExternrefTable0(ret[0]);
         }
