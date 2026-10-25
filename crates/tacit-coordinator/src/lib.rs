@@ -98,6 +98,17 @@ impl AppState {
         Ok(self)
     }
 
+    /// Caches compact blocks in the SQLite file at `path` and warms it in the
+    /// background from `from` (default: where Ironwood begins). Needs a chain
+    /// gateway and a running Tokio runtime.
+    pub fn with_block_cache(mut self, path: &str, from: Option<u64>) -> Result<Self, String> {
+        let chain = self.chain.take().ok_or("a block cache needs a chain gateway")?;
+        let chain = chain.with_cache(path).map_err(|e| e.to_string())?;
+        chain.spawn_warmer(from);
+        self.chain = Some(chain);
+        Ok(self)
+    }
+
     pub fn in_memory() -> rusqlite::Result<Self> {
         Self::open(":memory:")
     }

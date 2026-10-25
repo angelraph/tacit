@@ -10,7 +10,8 @@
 //! The same settings can come from the environment, which is how hosted
 //! deployments configure it: PORT (listens on 0.0.0.0:$PORT), TACIT_DB,
 //! TACIT_LIGHTWALLETD, TACIT_WEB (a directory holding the web app to serve
-//! next to the API) and TACIT_FAUCET (a local `tacit faucet` to relay).
+//! next to the API), TACIT_FAUCET (a local `tacit faucet` to relay), and
+//! TACIT_BLOCK_CACHE / TACIT_CACHE_FROM for the block cache.
 
 use axum::http::{header::HeaderName, HeaderValue};
 use tacit_coordinator::{router, AppState};
@@ -31,6 +32,14 @@ async fn main() {
     if let Some(url) = args.get(3).cloned().or_else(|| env("TACIT_LIGHTWALLETD")) {
         state = state.with_chain(&url).expect("lightwalletd url");
         println!("relaying chain data from {url}");
+        // A block cache next to the database, unless turned off with
+        // TACIT_BLOCK_CACHE=off. TACIT_CACHE_FROM picks the first height.
+        let cache = env("TACIT_BLOCK_CACHE").unwrap_or_else(|| format!("{db}.blocks"));
+        if cache != "off" && db != ":memory:" {
+            let from = env("TACIT_CACHE_FROM").and_then(|h| h.parse().ok());
+            state = state.with_block_cache(&cache, from).expect("open block cache");
+            println!("caching blocks in {cache}");
+        }
     }
     if let Some(url) = env("TACIT_FAUCET") {
         state = state.with_faucet(&url);

@@ -8,9 +8,23 @@
 //!
 //! Compact blocks are trimmed to their Ironwood actions, since Tacit never
 //! touches any other pool.
+//!
+//! Public lightwalletd servers hand out blocks at a few dozen a second, which
+//! makes restoring an older wallet slow. So the gateway can keep a block
+//! cache: every block buried deeper than [`CACHE_DEPTH`] is stored the first
+//! time anyone asks for it, and a background warmer fills the cache from the
+//! Ironwood activation height on. A cached range is served without touching
+//! the node at all.
+
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use axum::extract::{Path, Query, State};
+use axum::http::header::CONTENT_TYPE;
+use axum::response::{IntoResponse, Response};
 use axum::Json;
+use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use tonic::transport::{Channel, Endpoint};
 use zcash_client_backend::proto::service::compact_tx_streamer_client::CompactTxStreamerClient;
@@ -23,9 +37,24 @@ use crate::{bad, ApiError, AppState};
 /// Most blocks one request may ask for.
 pub const MAX_BLOCKS: u64 = 500;
 
+/// Blocks at least this deep are final enough to cache.
+pub const CACHE_DEPTH: u64 = 100;
+
+/// Where Ironwood begins; nothing Tacit can spend lies before it.
+pub fn ironwood_activation(chain: &str) -> u64 {
+    match chain {
+        "main" => 3_428_143,
+        "test" => 4_134_000,
+        _ => 1,
+    }
+}
+
 #[derive(Clone)]
 pub struct Chain {
     client: CompactTxStreamerClient<Channel>,
+    cache: Option<Arc<Mutex<Connection>>>,
+    /// Latest tip seen, for deciding what is deep enough to cache.
+    tip: Arc<AtomicU64>,
 }
 
 impl Chain {
@@ -39,7 +68,93 @@ impl Chain {
                 .map_err(|e| e.to_string())?;
         }
         let channel = endpoint.connect_lazy();
-        Ok(Chain { client: CompactTxStreamerClient::new(channel).max_decoding_message_size(64 << 20) })
+        Ok(Chain {
+            client: CompactTxStreamerClient::new(channel).max_decoding_message_size(64 << 20),
+            cache: None,
+            tip: Arc::new(AtomicU64::new(0)),
+        })
+    }
+
+    /// Keeps a block cache in the SQLite file at `path`.
+    pub fn with_cache(mut self, path: &str) -> rusqlite::Result<Self> {
+        let conn = Connection::open(path)?;
+        conn.execute_batch(
+            "PRAGMA journal_mode = WAL;
+             PRAGMA synchronous = NORMAL;
+             CREATE TABLE IF NOT EXISTS blocks (height INTEGER PRIMARY KEY, body TEXT NOT NULL);",
+        )?;
+        self.cache = Some(Arc::new(Mutex::new(conn)));
+        Ok(self)
+    }
+
+    /// Fills the cache in the background, from `from` (or the Ironwood
+    /// activation height) up to the tip, then keeps up as blocks arrive.
+    pub fn spawn_warmer(&self, from: Option<u64>) {
+        let Some(_) = &self.cache else { return };
+        let me = self.clone();
+        tokio::spawn(async move {
+            let mut c = me.client.clone();
+            let start = loop {
+                match c.get_lightd_info(Empty {}).await {
+                    Ok(i) => {
+                        let name = if matches!(i.get_ref().chain_name.as_str(), "main" | "mainnet") { "main" } else { "test" };
+                        break from.unwrap_or_else(|| ironwood_activation(name));
+                    }
+                    Err(e) => {
+                        eprintln!("block cache: node unreachable ({}), retrying", e.message());
+                        tokio::time::sleep(Duration::from_secs(30)).await;
+                    }
+                }
+            };
+            let mut h = start;
+            println!("block cache: warming from {start}");
+            loop {
+                if let Ok(t) = c.get_latest_block(ChainSpec::default()).await {
+                    me.tip.fetch_max(t.into_inner().height, Ordering::Relaxed);
+                }
+                let safe = me.tip.load(Ordering::Relaxed).saturating_sub(CACHE_DEPTH);
+                while h <= safe {
+                    let to = (h + MAX_BLOCKS - 1).min(safe);
+                    if me.cached(h, to).is_none() {
+                        match fetch(&mut c, h, to).await {
+                            Ok(blocks) => me.store(&blocks),
+                            Err(e) => {
+                                eprintln!("block cache: {} at {h}, retrying", e.message());
+                                tokio::time::sleep(Duration::from_secs(10)).await;
+                                continue;
+                            }
+                        }
+                    }
+                    h = to + 1;
+                }
+                tokio::time::sleep(Duration::from_secs(60)).await;
+            }
+        });
+    }
+
+    /// The range as a JSON array, if every block in it is cached.
+    fn cached(&self, from: u64, to: u64) -> Option<String> {
+        let db = self.cache.as_ref()?.lock().unwrap();
+        let mut stmt = db.prepare_cached("SELECT body FROM blocks WHERE height BETWEEN ?1 AND ?2 ORDER BY height").ok()?;
+        let bodies: Vec<String> = stmt
+            .query_map(params![from as i64, to as i64], |r| r.get(0))
+            .ok()?
+            .collect::<Result<_, _>>()
+            .ok()?;
+        (bodies.len() as u64 == to - from + 1).then(|| format!("[{}]", bodies.join(",")))
+    }
+
+    fn store(&self, blocks: &[Block]) {
+        let Some(cache) = &self.cache else { return };
+        let safe = self.tip.load(Ordering::Relaxed).saturating_sub(CACHE_DEPTH);
+        let mut db = cache.lock().unwrap();
+        let Ok(tx) = db.transaction() else { return };
+        for b in blocks.iter().filter(|b| b.height <= safe) {
+            if let Ok(body) = serde_json::to_string(b) {
+                let _ = tx.execute("INSERT OR REPLACE INTO blocks (height, body) VALUES (?1, ?2)", params![b.height as i64, body]);
+            }
+        }
+        let _ = tx.commit();
     }
 }
 
@@ -71,6 +186,9 @@ pub async fn info(State(s): State<AppState>) -> Result<Json<Info>, ApiError> {
     let mut c = chain(&s)?;
     let lightd = c.get_lightd_info(Empty {}).await.map_err(upstream)?.into_inner();
     let tip = c.get_latest_block(ChainSpec::default()).await.map_err(upstream)?.into_inner();
+    if let Some(ch) = &s.chain {
+        ch.tip.fetch_max(tip.height, Ordering::Relaxed);
+    }
     // Zebra's regtest calls itself "test"; only regtest activates Sapling at
     // height 1.
     let chain = match lightd.chain_name.as_str() {
@@ -145,24 +263,35 @@ pub struct Range {
     to: u64,
 }
 
-pub async fn blocks(State(s): State<AppState>, Query(r): Query<Range>) -> Result<Json<Vec<Block>>, ApiError> {
+pub async fn blocks(State(s): State<AppState>, Query(r): Query<Range>) -> Result<Response, ApiError> {
     if r.from == 0 || r.to < r.from {
         return Err(bad("need 1 <= from <= to"));
     }
     if r.to - r.from >= MAX_BLOCKS {
         return Err(bad(format!("at most {MAX_BLOCKS} blocks per request")));
     }
-    let mut stream = chain(&s)?
+    let ch = s.chain.as_ref().ok_or_else(|| {
+        ApiError(axum::http::StatusCode::SERVICE_UNAVAILABLE, "this coordinator has no chain gateway".into())
+    })?;
+    if let Some(body) = ch.cached(r.from, r.to) {
+        return Ok(([(CONTENT_TYPE, "application/json")], body).into_response());
+    }
+    let out = fetch(&mut chain(&s)?, r.from, r.to).await.map_err(upstream)?;
+    ch.store(&out);
+    Ok(Json(out).into_response())
+}
+
+async fn fetch(c: &mut CompactTxStreamerClient<Channel>, from: u64, to: u64) -> Result<Vec<Block>, tonic::Status> {
+    let mut stream = c
         .get_block_range(BlockRange {
-            start: Some(BlockId { height: r.from, hash: vec![] }),
-            end: Some(BlockId { height: r.to, hash: vec![] }),
+            start: Some(BlockId { height: from, hash: vec![] }),
+            end: Some(BlockId { height: to, hash: vec![] }),
             pool_types: vec![],
         })
-        .await
-        .map_err(upstream)?
+        .await?
         .into_inner();
     let mut out = Vec::new();
-    while let Some(b) = stream.message().await.map_err(upstream)? {
+    while let Some(b) = stream.message().await? {
         let txs = b
             .vtx
             .into_iter()
@@ -191,7 +320,7 @@ pub async fn blocks(State(s): State<AppState>, Query(r): Query<Range>) -> Result
             txs,
         });
     }
-    Ok(Json(out))
+    Ok(out)
 }
 
 #[derive(Serialize)]

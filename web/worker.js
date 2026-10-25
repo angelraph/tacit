@@ -58,19 +58,45 @@ function walletState() {
 // Scans from a scanner's height to the chain tip in batches. The scanner
 // skips the tree's hashing unless a block pays it; then it stops and asks
 // for the tree state there, and the scan picks up from that block.
+//
+// Downloads run ahead of the scan (up to AHEAD requests in flight), and the
+// batch size follows how heavy recent blocks were: a quiet chain goes 500
+// blocks a request, a flooded one 50.
+const AHEAD = 3;
 async function catchUp(id, scanner, label) {
   const info = await api("/v1/chain/info");
   const start = scanner.height();
   let h = start;
+  let size = BATCH;
+  let queued = [];
+  let fetchedTo = h;
+  const fill = () => {
+    while (queued.length < AHEAD && fetchedTo < info.tip) {
+      const from = fetchedTo + 1;
+      const to = Math.min(info.tip, fetchedTo + size);
+      queued.push({ from, to, text: getText(`/v1/chain/blocks?from=${from}&to=${to}`) });
+      fetchedTo = to;
+    }
+  };
+  fill();
   while (h < info.tip) {
-    const to = Math.min(info.tip, h + BATCH);
-    const blocks = await getText(`/v1/chain/blocks?from=${h + 1}&to=${to}`);
+    const batch = queued.shift();
+    const blocks = await batch.text;
+    const perBlock = blocks.length / (batch.to - batch.from + 1);
+    size = perBlock < 4000 ? 500 : perBlock < 40000 ? BATCH : 50;
+    fill();
     try {
       scanner.scan(blocks);
     } catch (e) {
       const need = /need the tree state at block (\d+)/.exec(e && e.message);
       if (!need) throw e;
       scanner.setTree(await getText(`/v1/chain/tree/${need[1]}`));
+      // The scan stopped inside this batch: drop what was fetched ahead and
+      // carry on from the block that pays us.
+      queued.forEach((q) => q.text.catch(() => {}));
+      queued = [];
+      fetchedTo = scanner.height();
+      fill();
     }
     h = scanner.height();
     progress(id, { label, done: h - start, total: info.tip - start, height: h, tip: info.tip });

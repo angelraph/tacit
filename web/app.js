@@ -1247,7 +1247,7 @@ function renderOnboard(token) {
     const m = modal(`
       <h2>Restore a wallet</h2>
       <label class="field"><span>Recovery phrase</span><textarea id="ph" placeholder="12 or 24 words"></textarea></label>
-      <label class="field" style="margin-top:12px"><span>Scan from block (the block the wallet was made, or earlier)</span><input id="bh" inputmode="numeric" placeholder="${S.info.tip - 1000}" /></label>
+      <label class="field" style="margin-top:12px"><span>Scan from block (when the wallet first got Ironwood funds; leave empty for a new wallet)</span><input id="bh" inputmode="numeric" placeholder="${S.info.tip - 1000}" /></label>
       <label class="field" style="margin-top:12px"><span>New passcode for this browser</span><input id="p1" type="password" autocomplete="new-password" /></label>
       <div class="row" style="margin-top:16px"><span class="spacer"></span><button class="btn ghost" data-close>Cancel</button><button class="btn primary" id="go">Restore</button></div>`);
     m.querySelector("#go").onclick = async () => {
@@ -1257,7 +1257,9 @@ function renderOnboard(token) {
       if (pass.length < 6) return toast("Use a passcode of at least 6 characters", "error");
       const bh = parseInt(m.querySelector("#bh").value, 10);
       m.close();
-      await createWallet(phrase, pass, Number.isFinite(bh) ? Math.max(1, bh - 1) : Math.max(1, S.info.tip - 1000), token);
+      // Tacit only holds Ironwood notes, so nothing before Ironwood matters.
+      const ironwood = { main: 3428143, test: 4134000 }[S.net] || 1;
+      await createWallet(phrase, pass, Number.isFinite(bh) ? Math.max(ironwood, bh - 1) : Math.max(1, S.info.tip - 1000), token);
     };
   };
 }
