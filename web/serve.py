@@ -32,7 +32,14 @@ class Isolated(http.server.SimpleHTTPRequestHandler):
         super().end_headers()
 
 
+class Server(http.server.ThreadingHTTPServer):
+    # The default backlog of 5 refuses some of the dozen parallel requests a
+    # browser makes for the page's modules.
+    request_queue_size = 128
+    daemon_threads = True
+
+
 if __name__ == "__main__":
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8770
-    http.server.ThreadingHTTPServer(("127.0.0.1", port), Isolated).serve_forever()
+    Server(("127.0.0.1", port), Isolated).serve_forever()
