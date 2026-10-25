@@ -139,7 +139,11 @@ document.getElementById("chain").onclick = () => {
 
 export function modal(inner) {
   const back = h(`<div class="modal-back"><div class="modal">${inner}</div></div>`);
-  back.close = () => back.remove();
+  back.close = () => {
+    if (!back.isConnected) return;
+    back.remove();
+    back.dispatchEvent(new Event("close"));
+  };
   back.addEventListener("click", (e) => {
     if (e.target === back || e.target.closest("[data-close]")) back.close();
   });
@@ -504,6 +508,8 @@ function offline() {
 async function renderAuction(m, token) {
   const id = m[1];
   await S.ready;
+  // Someone looking at an auction may bid: have the prover ready.
+  if (S.wallet) warmProver().catch(() => {});
   await refreshChain();
   const rec = await api(`/v1/auctions/${id}`);
   const terms = rec.terms;
@@ -765,11 +771,28 @@ async function extensionBid(terms, vault, amount, btn) {
   }
 }
 
+// One bid at a time: a second click while one is being proved or sent does
+// nothing.
+let bidInFlight = false;
+
 async function placeBid(terms, id, amount) {
+  if (bidInFlight) return;
   if (amount == null || amount < terms.reserve || amount > terms.bond) {
     toast(`Bid between ${zec(terms.reserve)} and ${zec(terms.bond)} ${unit()}`, "error");
     return;
   }
+  // The bond plus a generous fee. Say why, rather than failing later.
+  const need = terms.bond + 30000;
+  if (S.wallet && S.wallet.spendable < need) {
+    if (S.wallet.balance >= need) {
+      toast(`Your last payment's change is still confirming (about one block). Try again in a minute.`, "info");
+      syncWallet(true);
+    } else {
+      toast(`This bid needs ${zec(need)} ${unit()}; your wallet has ${zec(S.wallet.spendable)} ${unit()}.`, "error");
+    }
+    return;
+  }
+  bidInFlight = true;
   const opens = new Date(roundTime(terms.close_round) * 1000).toLocaleString();
   // Start proving right away; the confirmation below only decides whether
   // the finished transaction is broadcast.
@@ -801,10 +824,15 @@ async function placeBid(terms, id, amount) {
     <p class="muted">Your bid is encrypted to drand round ${terms.close_round} and travels inside a shielded memo. Nobody can read it before then. Once you send it, you can't change or cancel it.</p>
     <p class="faint" id="pv" style="font-size:13px"><span class="spinner" style="display:inline-block;vertical-align:middle"></span> Proving in the background so sending is instant. Nothing is sent until you confirm.</p>
     <div class="row"><span class="spacer"></span><button class="btn ghost" data-close id="cancel-bid">Cancel</button><button class="btn primary" id="go">Seal and send</button></div>`);
-  c.querySelector("#cancel-bid").addEventListener("click", () =>
-    prepared.then((p) => prove("dropBid", { ticket: p.ticket })).catch(() => {}),
-  );
+  let confirmed = false;
+  // However the dialog closes without "Seal and send", forget the proof.
+  c.addEventListener("close", () => {
+    if (confirmed) return;
+    bidInFlight = false;
+    prepared.then((p) => prove("dropBid", { ticket: p.ticket })).catch(() => {});
+  });
   c.querySelector("#go").onclick = async () => {
+    confirmed = true;
     c.close();
     const b = busy("Placing your sealed bid");
     try {
@@ -825,6 +853,8 @@ async function placeBid(terms, id, amount) {
     } catch (e) {
       b.close();
       toast(e.message, "error");
+    } finally {
+      bidInFlight = false;
     }
   };
 }
