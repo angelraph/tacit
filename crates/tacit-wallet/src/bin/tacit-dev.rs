@@ -529,8 +529,12 @@ async fn light_e2e() {
         while h < t {
             let to = t.min(h + 400);
             let blocks: Vec<Block> = serde_json::from_str(&get(format!("/v1/chain/blocks?from={}&to={to}", h + 1))).unwrap();
-            s.scan(&blocks).unwrap();
-            h = to;
+            match s.scan(&blocks) {
+                Ok(()) => {}
+                Err(tacit_light::Error::NeedTree(at)) => s.set_tree(&tree(at as u64)).unwrap(),
+                Err(e) => panic!("scan: {e}"),
+            }
+            h = s.height() as u64;
         }
     };
     let pk = build::proving_key();
@@ -613,6 +617,83 @@ async fn light_e2e() {
     println!("\nlight e2e passed: the browser wallet syncs, bids, audits and pays out of a FROST vault");
 }
 
+/// Checks the light scanner against a live chain gateway: audits a real
+/// auction from its terms, and scans its vault with witnesses (fetching the
+/// tree only where the vault was paid) to confirm the witnesses' anchor
+/// matches the chain's actual tree root at the tip.
+fn scan_check(gateway: &str, auction: &str) {
+    use tacit_light::chain::{Block, Info, RawTx, Tree};
+    use tacit_light::{audit::Audit, keys, scan::parse_tree, Net, Scanner};
+
+    let http: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(120))).build().into();
+    let get = |path: String| -> String { http.get(&format!("{gateway}{path}")).call().unwrap().body_mut().read_to_string().unwrap() };
+    let rec: serde_json::Value = serde_json::from_str(&get(format!("/v1/auctions/{auction}"))).unwrap();
+    let terms: tacit_core::auction::Terms = serde_json::from_value(rec["terms"].clone()).unwrap();
+    let tip = serde_json::from_str::<Info>(&get("/v1/chain/info".into())).unwrap().tip;
+    let tree = |h: u64| -> Tree { serde_json::from_str(&get(format!("/v1/chain/tree/{h}"))).unwrap() };
+    let created = terms.created_height as u64;
+    let mut trees_fetched = 0;
+    let mut catch_up = |s: &mut Scanner| {
+        let mut h = s.height() as u64;
+        while h < tip {
+            let to = tip.min(h + 400);
+            let blocks: Vec<Block> = serde_json::from_str(&get(format!("/v1/chain/blocks?from={}&to={to}", h + 1))).unwrap();
+            match s.scan(&blocks) {
+                Ok(()) => {}
+                Err(tacit_light::Error::NeedTree(at)) => {
+                    trees_fetched += 1;
+                    s.set_tree(&tree(at as u64)).unwrap()
+                }
+                Err(e) => panic!("scan: {e}"),
+            }
+            h = s.height() as u64;
+        }
+    };
+
+    let t = Instant::now();
+    let mut audit = Audit::new(terms.clone(), &tree(created)).unwrap();
+    catch_up(audit.scanner());
+    for txid in audit.wanted() {
+        let raw: RawTx = serde_json::from_str(&get(format!("/v1/chain/tx/{txid}"))).unwrap();
+        audit.add_tx(&txid, &raw).unwrap();
+    }
+    let round = terms.close_round;
+    let b: serde_json::Value = serde_json::from_str(
+        &http
+            .get(&format!("https://api.drand.sh/52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971/public/{round}"))
+            .call()
+            .unwrap()
+            .body_mut()
+            .read_to_string()
+            .unwrap(),
+    )
+    .unwrap();
+    let beacon = tacit_core::beacon::Beacon::verify(round, &hex::decode(b["signature"].as_str().unwrap()).unwrap()).unwrap();
+    let report = audit.report(Some(&beacon)).unwrap();
+    println!("audit: {:?}, {} deposits, scanned {} blocks in {:?}", report.verdict, report.deposits.len(), tip - created, t.elapsed());
+    assert_eq!(report.verdict, tacit_light::audit::Verdict::Honest);
+
+    let t = Instant::now();
+    let net = Net::parse(&terms.network).unwrap();
+    let fvk = keys::decode_fvk(net, &terms.vault_ufvk).unwrap();
+    let mut vault = Scanner::new(net, fvk, &tree(created)).unwrap();
+    catch_up(&mut vault);
+    let live = vault.found().iter().filter(|f| f.is_unspent()).count();
+    let chain_root: orchard::Anchor = parse_tree(&tree(tip).ironwood_tree).unwrap().root().into();
+    println!(
+        "vault: {} notes, {} unspent with witnesses, {} tree fetches, {:?}",
+        vault.found().len(),
+        live,
+        trees_fetched,
+        t.elapsed()
+    );
+    if live > 0 {
+        assert_eq!(vault.anchor(), chain_root, "witness anchor must equal the chain's tree root at the tip");
+        println!("witness anchor matches the chain's tree root at {tip}");
+    }
+    println!("scan check passed");
+}
+
 #[tokio::main]
 async fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -621,6 +702,10 @@ async fn main() {
         Some("vault-e2e") => vault_e2e().await,
         Some("auction-e2e") => auction_e2e().await,
         Some("light-e2e") => light_e2e().await,
+        Some("scan-check") => scan_check(
+            args.get(2).map(String::as_str).unwrap_or("https://tacit-production-6a96.up.railway.app"),
+            args.get(3).map(String::as_str).expect("usage: tacit-dev scan-check <gateway> <auction id>"),
+        ),
         Some("mine") => mine(args.get(2).and_then(|n| n.parse().ok()).unwrap_or(1)),
         Some("mine-every") => {
             // A steady block clock for trying the web app on regtest.

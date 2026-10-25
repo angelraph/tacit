@@ -43,7 +43,7 @@ impl Audit {
         let fvk = decode_fvk(net, &terms.vault_ufvk)?;
         let ivk = fvk.to_ivk(Scope::External).prepare();
         let ovks = [fvk.to_ovk(Scope::External), fvk.to_ovk(Scope::Internal)];
-        let scanner = Scanner::new(net, fvk, birthday)?;
+        let scanner = Scanner::watch_only(net, fvk, birthday)?;
         Ok(Audit { terms, net, scanner, ivk, ovks, memos: HashMap::new(), paid: None })
     }
 

@@ -180,6 +180,13 @@ impl Wallet {
         self.scanner.scan(&blocks).map_err(err)
     }
 
+    /// The tree state a scan asked for ("need the tree state at block N").
+    #[wasm_bindgen(js_name = setTree)]
+    pub fn set_tree(&mut self, tree: &str) -> Result<(), JsError> {
+        let tree: Tree = serde_json::from_str(tree).map_err(err)?;
+        self.scanner.set_tree(&tree).map_err(err)
+    }
+
     /// Seals a bid and builds the bond deposit. Returns the transaction as
     /// JSON (`txid`, hex `data`, `fee`, `spent`). Call [`Wallet::sent`] once
     /// it has been broadcast.

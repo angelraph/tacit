@@ -32,6 +32,10 @@ pub enum Error {
     Chain(String),
     #[error("the chain reorganised below height {0}; rescan from an earlier height")]
     Reorg(u32),
+    /// The next block pays us, so the scanner needs the tree state after
+    /// this height ([`Scanner::set_tree`]) before it can build a witness.
+    #[error("need the tree state at block {0}")]
+    NeedTree(u32),
     #[error("not enough funds: have {have} zat spendable, need {need}")]
     Funds { have: u64, need: u64 },
     #[error("building transaction: {0}")]

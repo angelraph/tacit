@@ -72,6 +72,14 @@ export const S = {
   locked: false,
   auctions: [],
   ready: null,
+  // Auctions this browser has audited as settled, kept across reloads.
+  settled: (() => {
+    try {
+      return JSON.parse(safeGet("tacit.settled") || "{}");
+    } catch {
+      return {};
+    }
+  })(),
 };
 
 // ---------- boot ----------
@@ -660,9 +668,21 @@ async function renderAuction(m, token) {
     { once: true },
   );
   draw();
+  // Once the bids are open, find out whether the vault has paid by running
+  // the audit itself (a few seconds), and again each minute until it has.
+  let audited = 0;
+  const autoAudit = () => {
+    if (!current(token) || (S.settled[id] && audited) || phase(terms, S.info && S.info.tip).key !== "open") return;
+    if (Date.now() - audited < 60000 || view.querySelector("#run-audit").disabled) return;
+    audited = Date.now();
+    runAudit(terms, id);
+  };
+  autoAudit();
   every(15000, async () => {
     await refreshChain();
-    if (current(token)) draw();
+    if (!current(token)) return;
+    draw();
+    autoAudit();
   });
 }
 
@@ -732,6 +752,26 @@ async function placeBid(terms, id, amount) {
     return;
   }
   const opens = new Date(roundTime(terms.close_round) * 1000).toLocaleString();
+  // Start proving right away; the confirmation below only decides whether
+  // the finished transaction is broadcast.
+  const refundIndex = nextRefundIndex();
+  let follow = null;
+  let last = null;
+  const prepared = (async () => {
+    await warmProver();
+    const rec = storedWallet();
+    return prove("prepareBid", { terms, amount, refundIndex, phrase: S.phrase, saved: rec.saved }, (p) => {
+      last = p;
+      if (follow) follow(p);
+    });
+  })();
+  prepared.then(
+    () => {
+      const el = document.getElementById("pv");
+      if (el) el.innerHTML = `<span class="badge settled">Ready</span> Proved. Sending is instant.`;
+    },
+    () => {},
+  );
   const c = modal(`
     <h2>Seal this bid?</h2>
     <dl class="kv" style="margin:14px 0">
@@ -740,19 +780,24 @@ async function placeBid(terms, id, amount) {
       <dt>Readable from</dt><dd>${esc(opens)}</dd>
     </dl>
     <p class="muted">Your bid is encrypted to drand round ${terms.close_round} and travels inside a shielded memo. Nobody can read it before then. Once you send it, you can't change or cancel it.</p>
-    <div class="row"><span class="spacer"></span><button class="btn ghost" data-close>Cancel</button><button class="btn primary" id="go">Seal and send</button></div>`);
+    <p class="faint" id="pv" style="font-size:13px"><span class="spinner" style="display:inline-block;vertical-align:middle"></span> Proving in the background so sending is instant. Nothing is sent until you confirm.</p>
+    <div class="row"><span class="spacer"></span><button class="btn ghost" data-close id="cancel-bid">Cancel</button><button class="btn primary" id="go">Seal and send</button></div>`);
+  c.querySelector("#cancel-bid").addEventListener("click", () => prepared.finally(() => prove("dropBid").catch(() => {})));
   c.querySelector("#go").onclick = async () => {
     c.close();
     const b = busy("Placing your sealed bid");
     try {
-      const refundIndex = nextRefundIndex();
-      b.onProgress({ label: "Starting the prover", spin: true });
-      const r = await proveWith("bid", { terms, amount, refundIndex }, b.onProgress);
+      follow = b.onProgress;
+      b.onProgress(last || { label: "Starting the prover", spin: true });
+      await prepared;
+      const r = await prove("broadcastBid", {}, b.onProgress);
+      saveScan(r.saved);
+      S.wallet = await call("openWallet", { phrase: S.phrase, saved: r.saved });
       addBid({ auction: id, item: terms.item, amount, txid: r.txid, refundIndex, time: Date.now() });
       b.close();
       modal(`
         <h2>Bid sealed and sent</h2>
-        <p class="notice good">Your ${zec(terms.bond)} ${unit()} bond is on its way to the vault. Proving took ${(r.proveMs / 1000).toFixed(1)} s, right here in your browser.</p>
+        <p class="notice good">Your ${zec(terms.bond)} ${unit()} bond is on its way to the vault. It was proved in ${(r.proveMs / 1000).toFixed(1)} s right here in your browser, while you confirmed.</p>
         <p class="faint" style="margin-top:12px;font-size:13px">Transaction</p><div class="addr">${esc(r.txid)}</div>
         <div class="row" style="margin-top:16px"><span class="spacer"></span><button class="btn primary" data-close>Done</button></div>`);
       route();
@@ -784,9 +829,9 @@ async function runAudit(terms, id) {
     const t0 = performance.now();
     const r = await call("audit", { terms, beacon: b }, onProgress);
     const secs = ((performance.now() - t0) / 1000).toFixed(1);
-    S.settled = S.settled || {};
     if (r.verdict === "honest") {
       S.settled[id] = true;
+      safeSet("tacit.settled", JSON.stringify(S.settled));
       const badge = view.querySelector("#phase-badge");
       if (badge) badge.outerHTML = `<span id="phase-badge" class="badge settled">Settled</span>`;
       const steps = [...view.querySelectorAll("#timeline .step")];

@@ -190,6 +190,13 @@ impl VaultSeat {
         self.scanner.scan(&blocks).map_err(err)
     }
 
+    /// The tree state a scan asked for ("need the tree state at block N").
+    #[wasm_bindgen(js_name = setTree)]
+    pub fn set_tree(&mut self, tree: &str) -> Result<(), JsError> {
+        let tree: Tree = serde_json::from_str(tree).map_err(err)?;
+        self.scanner.set_tree(&tree).map_err(err)
+    }
+
     /// Builds and proves a payout of the whole vault to `to`, and starts
     /// coordinating its signature with `cosigner` (a seat number). Returns
     /// the amount paid.
