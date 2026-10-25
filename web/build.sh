@@ -11,7 +11,7 @@ cd "$(dirname "$0")/.."
 TARGET_DIR="${TACIT_WASM_TARGET:-target/web}"
 export CC_wasm32_unknown_unknown="${CC_wasm32_unknown_unknown:-clang}"
 export AR_wasm32_unknown_unknown="${AR_wasm32_unknown_unknown:-llvm-ar}"
-RAND='--cfg getrandom_backend="wasm_js"'
+RAND='--cfg getrandom_backend="wasm_js" --cfg zcash_unstable="nu7"'
 
 if [ "$1" != "threads-only" ]; then
   RUSTFLAGS="$RAND" cargo build --release -p tacit-wasm --target wasm32-unknown-unknown --target-dir "$TARGET_DIR/single"

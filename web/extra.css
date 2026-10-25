@@ -521,3 +521,26 @@ body.mega-open .mega {
     display: none;
   }
 }
+
+/* QR codes: dark on white so every wallet's scanner reads them. */
+.qr {
+  width: min(220px, 70%);
+  margin: 14px auto 0;
+  padding: 10px;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 10px 30px -14px rgba(109, 92, 255, 0.6);
+}
+.qr svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.qr:empty {
+  display: none;
+}
+
+/* Installable app button; .btn's display must not beat [hidden]. */
+[hidden] { display: none !important; }
+.install { border-color: rgba(142, 123, 255, 0.45); }
+

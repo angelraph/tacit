@@ -73,7 +73,7 @@ export function renderTerms() {
       <h2>Risks you accept</h2>
       <ul>
         <li><b>Software risk.</b> This is new code built for the Zecathon. Bugs can lose funds. Start on testnet, then with small amounts.</li>
-        <li><b>Key loss.</b> If you lose your 24-word phrase and your browser data, nobody can recover your wallet.</li>
+        <li><b>Key loss.</b> If you lose your recovery phrase and your browser data, nobody can recover your wallet.</li>
         <li><b>Collusion.</b> Any two seats of a vault can move its funds. Pick agents you trust not to collude with the other side.</li>
         <li><b>Liveness.</b> If drand stops, bids stay sealed until it resumes. If agents go offline, settlement waits for them.</li>
         <li><b>Metadata.</b> Timing and your IP address are not hidden by Tacit. Use Tor if that matters to you.</li>
@@ -100,7 +100,7 @@ export function gate(ctx) {
       <div class="gate-body">
         <h2 style="font-size:21px">Before you continue</h2>
         <p class="muted" style="font-size:14px">Tacit is open-source software that runs entirely in your browser. Nobody holds your funds or your keys, and nobody can undo a transaction. It is new code: start on testnet, then with amounts you can afford to lose.</p>
-        <p class="muted" style="font-size:14px">Your 24-word recovery phrase is the only way back into your wallet.</p>
+        <p class="muted" style="font-size:14px">Your recovery phrase is the only way back into your wallet.</p>
         <label class="row" style="gap:10px;flex-wrap:nowrap;align-items:flex-start;padding:14px;border-radius:12px;background:rgba(255,255,255,.04);border:1px solid var(--line);font-size:13.5px;color:var(--muted)">
           <input type="checkbox" id="gate-ok" style="margin-top:2px" />
           <span>I've read the <a href="#/terms" data-close>terms and risks</a>, and I'm responsible for making sure my use of Tacit is lawful where I am.</span>

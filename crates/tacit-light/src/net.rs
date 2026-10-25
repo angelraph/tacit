@@ -54,6 +54,9 @@ impl Parameters for Net {
         match self {
             Net::Main => MAIN_NETWORK.activation_height(nu),
             Net::Test => TEST_NETWORK.activation_height(nu),
+            // The local Zebra regtest chain stops at NU6.3.
+            #[cfg(zcash_unstable = "nu7")]
+            Net::Regtest if nu == NetworkUpgrade::Nu7 => None,
             Net::Regtest => Some(BlockHeight::from_u32(1)),
         }
     }

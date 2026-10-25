@@ -1,0 +1,5 @@
+# NU7 (testnet since block 4,465,026; mainnet at 3,543,405). See the
+# zcash_protocol patch in Cargo.toml. web/build.sh sets RUSTFLAGS itself and
+# repeats this flag there.
+[build]
+rustflags = ["--cfg", 'zcash_unstable="nu7"']

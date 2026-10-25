@@ -6,11 +6,12 @@ license.workspace = true
 
 [dependencies]
 tacit-vault = { path = "../tacit-vault" }
-zcash_client_backend = { version = "0.24.0", features = ["orchard", "pczt", "lightwalletd-tonic-transport", "lightwalletd-tonic-tls-webpki-roots", "sync"] }
+zcash_client_backend = { version = "0.24.0", features = ["orchard", "pczt", "lightwalletd-tonic-transport", "lightwalletd-tonic-tls-webpki-roots", "sync", "transparent-inputs"] }
 zcash_client_sqlite = { version = "0.22.0", features = ["orchard", "multicore", "transparent-inputs", "serde"] }
 zcash_primitives = "0.30.1"
 zcash_protocol = { version = "0.10", features = ["local-consensus"] }
-zcash_keys = { version = "0.16.1", features = ["orchard", "unstable-frost"] }
+zcash_keys = { version = "0.16.1", features = ["orchard", "unstable-frost", "transparent-inputs"] }
+zcash_transparent = { version = "0.10", features = ["transparent-inputs"] }
 pczt = { version = "0.9.3", features = ["orchard", "prover", "tx-extractor", "signer"] }
 orchard = "0.15"
 tonic = { version = "0.14", features = ["tls-webpki-roots"] }
@@ -30,3 +31,6 @@ tacit-core = { path = "../tacit-core" }
 tacit-regtest = { path = "../tacit-regtest" }
 tacit-coordinator = { path = "../tacit-coordinator" }
 tacit-light = { path = "../tacit-light" }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(zcash_unstable, values("nu7"))'] }

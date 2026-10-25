@@ -11,6 +11,17 @@ export TACIT_DB="$DATA/coordinator.sqlite"
 export PORT="${PORT:-8080}"
 mkdir -p "$DATA"
 
+# The testnet faucet: a wallet that drips TAZ to anyone who asks from the app.
+# It takes donations on a transparent address too and shields them itself.
+if [ "$NET" != "main" ]; then
+  fhome="$DATA/faucet"
+  if [ ! -f "$fhome/config.json" ]; then
+    /app/bin/tacit --network "$NET" --home "$fhome" init --server "$TACIT_LIGHTWALLETD" --coordinator "http://127.0.0.1:$PORT"
+  fi
+  /app/bin/tacit --network "$NET" --home "$fhome" faucet --listen 127.0.0.1:8091 --amount "${TACIT_DRIP:-0.05}" &
+  export TACIT_FAUCET="http://127.0.0.1:8091"
+fi
+
 /app/bin/tacit-coordinator &
 COORD="http://127.0.0.1:$PORT"
 # Wait for the coordinator before the agents announce themselves.

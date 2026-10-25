@@ -162,7 +162,7 @@ export async function renderLanding(ctx) {
         <div class="steps">
           ${[
             ["Open a wallet", "Create a shielded wallet in this tab. Keys never leave it.", '<rect x="5" y="9" width="22" height="16" rx="3"/><path d="M20 17h7M5 13h22"/>'],
-            ["Fund it", "Use the testnet faucet, another wallet, or swap in from any chain.", '<circle cx="11" cy="16" r="6"/><circle cx="21" cy="16" r="6"/>'],
+            ["Fund it", "Tap for free testnet coins, connect Noir or any Zcash wallet, or swap in from any chain.", '<circle cx="11" cy="16" r="6"/><circle cx="21" cy="16" r="6"/>'],
             ["Seal a bid", "Pick a lot, set your price, press seal. Proving takes about 20 seconds.", '<rect x="7" y="13" width="18" height="13" rx="3"/><path d="M11 13V9a5 5 0 0110 0v4"/>'],
             ["Watch it settle", "When the round opens, agents settle and you audit it yourself.", '<circle cx="16" cy="16" r="11"/><path d="M11 16l4 4 7-8"/>'],
           ]

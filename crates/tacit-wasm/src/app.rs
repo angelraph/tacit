@@ -47,12 +47,18 @@ fn net(name: &str) -> Result<Net, JsError> {
     Net::parse(name).ok_or_else(|| err(format!("unknown network {name:?}")))
 }
 
-/// A fresh 24 word recovery phrase.
+/// A fresh recovery phrase of 12 words (128 bits of entropy) or 24 words
+/// (256 bits, the default, as Zashi uses).
 #[wasm_bindgen(js_name = newPhrase)]
-pub fn new_phrase() -> Result<String, JsError> {
+pub fn new_phrase(words: u32) -> Result<String, JsError> {
+    let len = match words {
+        12 => 16,
+        24 | 0 => 32,
+        _ => return Err(err("a recovery phrase has 12 or 24 words")),
+    };
     let mut entropy = [0u8; 32];
-    getrandom::getrandom(&mut entropy).map_err(err)?;
-    Ok(bip39::Mnemonic::from_entropy(&entropy).map_err(err)?.to_string())
+    getrandom::getrandom(&mut entropy[..len]).map_err(err)?;
+    Ok(bip39::Mnemonic::from_entropy(&entropy[..len]).map_err(err)?.to_string())
 }
 
 /// Whether a recovery phrase is a valid BIP 39 English phrase.
@@ -285,6 +291,26 @@ pub fn auction_id(terms: &str) -> Result<String, JsError> {
     let terms: Terms = serde_json::from_str(terms).map_err(err)?;
     terms.validate().map_err(err)?;
     Ok(hex::encode(terms.id()))
+}
+
+/// Seals a bid for someone paying from their own Zcash wallet (Zashi, Zingo,
+/// YWallet...). Returns the 512 byte memo as hex; the wallet sends exactly
+/// `terms.bond` to the vault with it. Refunds go to `refund_address`, which
+/// must be a unified address with a shielded receiver on the auction's
+/// network, ideally a fresh one. With `text` set it returns the printable
+/// form instead, for extension wallets whose API takes a UTF-8 memo.
+#[wasm_bindgen(js_name = sealBidMemo)]
+pub fn seal_bid_memo(terms: &str, amount: u64, refund_address: &str, text: bool) -> Result<String, JsError> {
+    let terms: Terms = serde_json::from_str(terms).map_err(err)?;
+    terms.validate().map_err(err)?;
+    let net = net(&terms.network)?;
+    if amount < terms.reserve || amount > terms.bond {
+        return Err(err(format!("bid between the reserve ({}) and the bond ({}) zatoshi", terms.reserve, terms.bond)));
+    }
+    let refund_to = tacit_light::keys::decode_raw_address(net, refund_address.trim()).map_err(err)?;
+    let bid = tacit_core::memo::Bid { auction: terms.id(), amount, refund_to };
+    let sealed = tacit_core::memo::SealedBid::seal(&bid, terms.close_round).map_err(err)?;
+    Ok(if text { sealed.to_text_memo() } else { hex::encode(sealed.to_memo()) })
 }
 
 /// The escrow id the terms commit to (hex).

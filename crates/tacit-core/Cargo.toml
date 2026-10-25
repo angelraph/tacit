@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 ark-bls12-381 = "0.6"
+base64 = "0.22"
 ark-ec = "0.6"
 ark-ff = "0.6"
 ark-serialize = "0.6"

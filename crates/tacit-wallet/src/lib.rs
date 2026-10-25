@@ -129,6 +129,9 @@ pub fn regtest() -> LocalNetwork {
         nu6_1: h,
         nu6_2: h,
         nu6_3: h,
+        // Zebra 6.4's regtest stops at NU6.3.
+        #[cfg(zcash_unstable = "nu7")]
+        nu7: None,
     }
 }
 
@@ -494,6 +497,90 @@ impl<P: Parameters + Clone + Send + Sync + 'static> Wallet<P> {
             })
             .map_err(db_err)?;
         rows.collect::<Result<_, _>>().map_err(db_err)
+    }
+
+    /// The account's first transparent address. Tacit itself never pays to
+    /// transparent addresses; this is a way in for senders that can't pay an
+    /// Ironwood address (public testnet faucets, some exchanges). Whatever
+    /// lands there is moved into Ironwood with [`Wallet::shield`].
+    pub fn transparent_address(&self, usk: &UnifiedSpendingKey) -> Result<String, WalletError> {
+        use zcash_transparent::keys::IncomingViewingKey;
+        let ivk = usk
+            .transparent()
+            .to_account_pubkey()
+            .derive_external_ivk()
+            .map_err(|e| WalletError::Build(format!("{e:?}")))?;
+        Ok(Address::Transparent(ivk.default_address().0).encode(&self.params))
+    }
+
+    /// Shields everything at the account's first transparent address into
+    /// Ironwood in one transaction. Returns `None` when there's nothing worth
+    /// shielding (less than the fee and a little more).
+    pub async fn shield(
+        &mut self,
+        client: &mut CompactTxStreamerClient<Channel>,
+        account: AccountUuid,
+        usk: &UnifiedSpendingKey,
+        pk: &ProvingKey,
+    ) -> Result<Option<TxId>, WalletError> {
+        use zcash_client_backend::data_api::wallet::propose_shielding;
+        use zcash_client_backend::data_api::CoinbaseFilter;
+        use zcash_transparent::keys::IncomingViewingKey;
+
+        let ivk = usk
+            .transparent()
+            .to_account_pubkey()
+            .derive_external_ivk()
+            .map_err(|e| WalletError::Build(format!("{e:?}")))?;
+        let (taddr, index) = ivk.default_address();
+        let input_selector = GreedyInputSelector::<Db<P>>::new();
+        let change_strategy = SingleOutputChangeStrategy::<StandardFeeRule, Db<P>>::new(
+            StandardFeeRule::Zip317,
+            None,
+            ShieldedPool::Ironwood,
+            DustOutputPolicy::default(),
+        );
+        let threshold = Zatoshis::from_u64(50_000).expect("valid amount");
+        let proposal = match propose_shielding::<_, _, _, _, Infallible>(
+            &mut self.db,
+            &self.params,
+            &input_selector,
+            &change_strategy,
+            threshold,
+            &[taddr],
+            account,
+            ConfirmationsPolicy::MIN,
+            CoinbaseFilter::AllTransparentOutputs,
+            None,
+        ) {
+            Ok(p) => p,
+            // Nothing (or too little) waiting to be shielded.
+            Err(e) if format!("{e:?}").contains("Insufficient") || format!("{e:?}").contains("NoInputs") => {
+                return Ok(None)
+            }
+            Err(e) => return Err(WalletError::Build(format!("{e:?}"))),
+        };
+        let pczt = create_pczt_from_proposal::<_, _, Infallible, _, Infallible, _>(
+            &mut self.db,
+            &self.params,
+            account,
+            OvkPolicy::Sender,
+            &proposal,
+            None,
+            BundlePadding::DEFAULT,
+        )
+        .map_err(|e| WalletError::Build(format!("{e:?}")))?;
+        let inputs = pczt.transparent().inputs().len();
+        let pczt = prove(pczt, pk)?;
+        let sk = usk
+            .transparent()
+            .derive_external_secret_key(index)
+            .map_err(|e| WalletError::Sign(format!("{e:?}")))?;
+        let mut signer = Signer::new(pczt).map_err(|e| WalletError::Sign(format!("{e:?}")))?;
+        for i in 0..inputs {
+            signer.sign_transparent(i, &sk).map_err(|e| WalletError::Sign(format!("{e:?}")))?;
+        }
+        Ok(Some(self.finish_and_send(client, signer.finish()).await?))
     }
 
     /// Stores a fully signed PCZT as a transaction and sends it to the network.

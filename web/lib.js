@@ -186,6 +186,72 @@ export function toast(msg, kind = "info") {
   setTimeout(() => el.remove(), 4800);
 }
 
+/** A QR code as an SVG string (dark modules on white, for any scanner). */
+export function qrSvg(text, cell = 4) {
+  if (typeof window.qrcode !== "function") return "";
+  const q = window.qrcode(0, "L");
+  q.addData(text, "Byte");
+  q.make();
+  return q.createSvgTag({ cellSize: cell, margin: 3, scalable: true });
+}
+
+// ---------- extension wallets ----------
+//
+// Zcash browser extensions that inject a provider for dApps. Noir's lives at
+// window.noirwallet.zcash; its send API takes decimal ZEC strings and a UTF-8
+// memo of at most 512 bytes. Extensions inject after page load, so detection
+// waits a moment before giving up.
+
+export const EXTENSIONS = [
+  {
+    id: "noir",
+    name: "Noir Wallet",
+    url: "https://docs.zknoir.com",
+    provider: () => window.noirwallet && window.noirwallet.isNoirWallet && window.noirwallet.zcash,
+  },
+];
+
+export async function detectExtension(waitMs = 1200) {
+  const until = Date.now() + waitMs;
+  for (;;) {
+    for (const x of EXTENSIONS) {
+      const p = x.provider();
+      if (p) return { ...x, zcash: p };
+    }
+    if (Date.now() > until) return null;
+    await new Promise((r) => setTimeout(r, 150));
+  }
+}
+
+const rpc = (z, method, params) => z.request(params ? { method, params } : { method });
+
+/** Asks the extension for access (a popup only the first time) and returns its addresses. */
+export async function extConnect(ext) {
+  let acct = null;
+  try {
+    acct = await rpc(ext.zcash, "zcash_getAccounts");
+  } catch {}
+  if (!acct || !acct.shielded) acct = await rpc(ext.zcash, "zcash_requestAccounts");
+  if (!acct || !acct.shielded) throw new Error(`${ext.name} didn't share a shielded address`);
+  return acct;
+}
+
+/** Spendable shielded balance in zatoshi, or null when the extension won't say. */
+export async function extBalance(ext) {
+  try {
+    const b = await rpc(ext.zcash, "zcash_getBalance", []);
+    return parseZec(b.shielded ?? b.available ?? b.total ?? "");
+  } catch {
+    return null;
+  }
+}
+
+/** Sends through the extension; resolves to the txid once it is broadcast. */
+export async function extSend(ext, { to, amountZat, memo }) {
+  const r = await rpc(ext.zcash, "zcash_sendTransaction", [{ to, amount: zec(amountZat), memo }]);
+  return typeof r === "string" ? r : r && (r.txid || r.txId || r.hash);
+}
+
 export async function copy(text) {
   try {
     await navigator.clipboard.writeText(text);

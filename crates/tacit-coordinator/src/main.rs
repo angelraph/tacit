@@ -9,8 +9,8 @@
 //!
 //! The same settings can come from the environment, which is how hosted
 //! deployments configure it: PORT (listens on 0.0.0.0:$PORT), TACIT_DB,
-//! TACIT_LIGHTWALLETD, and TACIT_WEB, a directory holding the web app to
-//! serve next to the API.
+//! TACIT_LIGHTWALLETD, TACIT_WEB (a directory holding the web app to serve
+//! next to the API) and TACIT_FAUCET (a local `tacit faucet` to relay).
 
 use axum::http::{header::HeaderName, HeaderValue};
 use tacit_coordinator::{router, AppState};
@@ -32,6 +32,10 @@ async fn main() {
         state = state.with_chain(&url).expect("lightwalletd url");
         println!("relaying chain data from {url}");
     }
+    if let Some(url) = env("TACIT_FAUCET") {
+        state = state.with_faucet(&url);
+        println!("relaying the testnet faucet at {url}");
+    }
     let mut app = router(state);
     if let Some(dir) = env("TACIT_WEB") {
         // wasm-bindgen-rayon's worker helpers import a package by its folder,
@@ -52,7 +56,7 @@ async fn main() {
     }
     let listener = tokio::net::TcpListener::bind(&addr).await.expect("bind listen address");
     println!("tacit-coordinator listening on http://{addr} (db: {db})");
-    axum::serve(listener, app)
+    axum::serve(listener, app.into_make_service_with_connect_info::<std::net::SocketAddr>())
         .with_graceful_shutdown(async {
             let _ = tokio::signal::ctrl_c().await;
         })

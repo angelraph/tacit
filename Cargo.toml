@@ -16,6 +16,11 @@ opt-level = 3
 # Ironwood FROST testnet transaction.
 [patch.crates-io]
 orchard = { git = "https://github.com/conradoplg/orchard.git", rev = "42015f15733b95e179189628d6fa34d92b5b3b8b" }
+# NU7 activated on testnet at 4,465,026 and is set for mainnet at 3,543,405.
+# It keeps the v6 transaction format, so the 0.10 line works once it knows
+# the final branch id and heights (taken from zcash_protocol 0.11). Builds
+# enable NU7 with `--cfg zcash_unstable="nu7"` (.cargo/config.toml).
+zcash_protocol = { path = "vendor/zcash_protocol" }
 
 # Our own curve code (tlock IBE) is too slow unoptimised for the tests.
 [profile.dev.package.tacit-core]

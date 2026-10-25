@@ -20,6 +20,7 @@ use tacit_core::auction::Terms;
 use tacit_core::escrow::EscrowTerms;
 
 pub mod chain;
+pub mod faucet;
 
 /// Largest message body accepted (a PCZT for a big settlement fits easily).
 pub const MAX_BODY: usize = 1 << 20;
@@ -28,6 +29,7 @@ pub const MAX_BODY: usize = 1 << 20;
 pub struct AppState {
     db: Arc<Mutex<Connection>>,
     chain: Option<chain::Chain>,
+    faucet: Option<String>,
 }
 
 impl AppState {
@@ -80,11 +82,17 @@ impl AppState {
         if !has_purpose {
             conn.execute_batch("ALTER TABLE rooms ADD COLUMN purpose TEXT NOT NULL DEFAULT ''")?;
         }
-        Ok(AppState { db: Arc::new(Mutex::new(conn)), chain: None })
+        Ok(AppState { db: Arc::new(Mutex::new(conn)), chain: None, faucet: None })
     }
 
     /// Also relays chain data from the lightwalletd-compatible gRPC server at
     /// `url`, so browsers can sync and broadcast through this coordinator.
+    /// Also relays a local `tacit faucet` at `url` to browsers.
+    pub fn with_faucet(mut self, url: &str) -> Self {
+        self.faucet = Some(url.to_string());
+        self
+    }
+
     pub fn with_chain(mut self, url: &str) -> Result<Self, String> {
         self.chain = Some(chain::Chain::new(url)?);
         Ok(self)
@@ -105,6 +113,8 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/agents", post(announce_agent).get(list_agents))
         .route("/v1/escrows", post(publish_escrow).get(list_escrows))
         .route("/v1/escrows/{id}", get(get_escrow))
+        .route("/v1/faucet/status", get(faucet::status))
+        .route("/v1/faucet/drip", post(faucet::drip))
         .route("/v1/chain/info", get(chain::info))
         .route("/v1/chain/tree/{height}", get(chain::tree))
         .route("/v1/chain/blocks", get(chain::blocks))
@@ -124,7 +134,9 @@ pub async fn spawn(addr: &str, state: AppState) -> std::io::Result<String> {
     let listener = tokio::net::TcpListener::bind(addr).await?;
     let local = listener.local_addr()?;
     tokio::spawn(async move {
-        axum::serve(listener, router(state)).await.expect("coordinator stopped");
+        axum::serve(listener, router(state).into_make_service_with_connect_info::<std::net::SocketAddr>())
+            .await
+            .expect("coordinator stopped");
     });
     Ok(format!("http://{local}"))
 }

@@ -3,8 +3,39 @@
 
 import {
   call, prove, api, beacon, roundTime, gatewayUrl, setGatewayUrl, safeGet, safeSet,
-  sealPhrase, openPhrase, zec, parseZec, short, ago, esc, h, toast, copy,
+  sealPhrase, openPhrase, zec, parseZec, short, ago, esc, h, toast, copy, qrSvg,
+  detectExtension, extConnect, extBalance, extSend, EXTENSIONS,
 } from "./lib.js";
+
+// Installable app: the service worker and the browser's install prompt.
+if ("serviceWorker" in navigator && location.protocol !== "file:") {
+  navigator.serviceWorker.register("./sw.js").catch(() => {});
+}
+let installPrompt = null;
+window.addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault();
+  installPrompt = e;
+  const b = document.getElementById("install");
+  if (!b) return;
+  b.hidden = false;
+  b.onclick = async () => {
+    b.hidden = true;
+    installPrompt.prompt();
+    await installPrompt.userChoice.catch(() => {});
+    installPrompt = null;
+  };
+});
+window.addEventListener("appinstalled", () => {
+  const b = document.getElementById("install");
+  if (b) b.hidden = true;
+});
+
+// The first extension wallet found in this browser (filled in at startup).
+let EXT = null;
+detectExtension(2500).then((x) => {
+  EXT = x;
+  if (x) document.dispatchEvent(new Event("tacit:ext"));
+});
 import { renderSell } from "./sell.js";
 import { renderEscrow } from "./escrow.js";
 import { renderFund } from "./fund.js";
@@ -249,6 +280,16 @@ let lastPath = null;
 let ticker = null;
 
 export async function route() {
+  // "#story", "#stats" and the like are anchors on the current page, not
+  // routes: scroll to them and keep the page as it is.
+  if (location.hash && !location.hash.startsWith("#/")) {
+    const target = document.getElementById(location.hash.slice(1));
+    const path = lastPath ?? "/";
+    history.replaceState(null, "", "#" + path);
+    if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+    else if (lastPath === null) route();
+    return;
+  }
   const path = location.hash.replace(/^#/, "") || "/";
   const token = ++renderToken;
   clearInterval(ticker);
@@ -288,7 +329,7 @@ const ctx = {
   S, call, api, modal, busy, toast, esc, h, zec, parseZec, short, ago, copy, unit, netName,
   storedWallet, saveScan, syncWallet, route, current, every, needWallet, phase, blockSecs: () => BLOCK_SECS,
   loadSeats, saveSeats, nextRefundIndex, prove, proveWith, warmProver, refreshChain: () => refreshChain(), roundTime,
-  usdPill,
+  usdPill, ext: () => EXT, extConnect, extSend,
 };
 
 /** A title with its last words dimmed, like Morpho's vault pages. */
@@ -542,22 +583,39 @@ async function renderAuction(m, token) {
       }`;
       return;
     }
-    if (!S.wallet) {
-      bp.innerHTML = `<h2>Place a sealed bid</h2><p class="muted">You need a Tacit wallet with at least ${zec(terms.bond + 20000)} ${unit()} to bid. It lives in this browser and takes a minute to set up.</p><a class="btn primary wide" href="#/wallet">Open wallet</a>`;
-      return;
-    }
     const mid = Math.round((terms.reserve + terms.bond) / 2 / 1000) * 1000;
+    const tab = bp.dataset.tab || (!S.wallet && EXT ? "plugin" : "tacit");
+    const extName = EXT ? EXT.name : "Extension";
     bp.innerHTML = `
+      <div class="tabs" style="margin-bottom:16px"><button data-t="tacit" class="${tab === "tacit" ? "on" : ""}">Tacit wallet</button><button data-t="plugin" class="${tab === "plugin" ? "on" : ""}">${esc(extName)}</button><button data-t="ext" class="${tab === "ext" ? "on" : ""}">Any wallet</button></div>
       <h2>Place a sealed bid</h2>
       <label class="field"><span>Your bid</span><div class="input-suffix"><input id="amt" inputmode="decimal" value="${zec(Math.max(terms.reserve, mid))}" /><b>${unit()}</b></div></label>
       <input type="range" id="slider" min="${terms.reserve}" max="${terms.bond}" step="${Math.max(1, Math.round((terms.bond - terms.reserve) / 200))}" value="${Math.max(terms.reserve, mid)}" style="margin:12px 0" />
-      <dl class="kv" style="margin-bottom:14px">
-        <dt>You deposit (bond)</dt><dd>${zec(terms.bond)} ${unit()}</dd>
-        <dt>Network fee</dt><dd>~0.0001 ${unit()}</dd>
-        <dt>Wallet balance</dt><dd>${zec(S.wallet.spendable)} ${unit()}</dd>
-      </dl>
-      <button class="btn primary wide" id="bid">Seal and deposit</button>
-      <p class="faint" style="font-size:13px;margin:12px 0 0">If you win you pay ${rule === "First price" ? "your bid" : "the second-highest bid (or the reserve)"}, and the rest of the bond comes back. If you don't, the whole bond comes back to a fresh, unlinkable address.</p>`;
+      ${
+        tab === "plugin"
+          ? EXT
+            ? `<dl class="kv" style="margin:14px 0"><dt>${esc(EXT.name)} sends</dt><dd>${zec(terms.bond)} ${unit()} + fee</dd><dt>Refund to</dt><dd>your ${esc(EXT.name)} shielded address</dd><dt>Balance</dt><dd id="ext-bal">…</dd></dl>
+               <button class="btn primary wide" id="plug-go">Seal and pay with ${esc(EXT.name)}</button>
+               <p class="faint" style="font-size:13px;margin:12px 0 0">Your bid is sealed here first. ${esc(EXT.name)} only sees the bond and an encrypted memo, and asks you to approve once.</p>`
+            : `<p class="muted">No Zcash extension wallet found in this browser. Install one that supports dApps, then reload this page:</p>
+               <div class="row" style="flex-wrap:wrap">${EXTENSIONS.map((x) => `<a class="btn small" href="${x.url}" target="_blank" rel="noopener">Get ${esc(x.name)} ↗</a>`).join("")}</div>
+               <p class="faint" style="font-size:13px;margin:12px 0 0">On testnet, use the extension's testnet build.</p>`
+          : tab === "ext"
+          ? `<label class="field"><span>Your refund address (a shielded ${unit()} address from your wallet)</span><input id="refund" placeholder="${S.net === "main" ? "u1…" : "utest1…"}" /></label>
+             <dl class="kv" style="margin:14px 0"><dt>Your wallet sends</dt><dd>${zec(terms.bond)} ${unit()} + fee</dd><dt>Memo</dt><dd>your sealed bid</dd></dl>
+             <button class="btn primary wide" id="ext-go">Create payment request</button>
+             <div id="ext-out"></div>
+             <p class="faint" style="font-size:13px;margin:12px 0 0">Works with any wallet that can pay a ZIP 321 request to an Ironwood address with a memo. Your bid is sealed here, in your browser, before the request is made.</p>`
+          : S.wallet
+            ? `<dl class="kv" style="margin-bottom:14px">
+                <dt>You deposit (bond)</dt><dd>${zec(terms.bond)} ${unit()}</dd>
+                <dt>Network fee</dt><dd>~0.0001 ${unit()}</dd>
+                <dt>Wallet balance</dt><dd>${zec(S.wallet.spendable)} ${unit()}</dd>
+              </dl>
+              <button class="btn primary wide" id="bid">Seal and deposit</button>`
+            : `<p class="muted">Bid from a Tacit wallet in this browser (it takes a minute to set up), or switch to "Any Zcash wallet" to pay with Zashi, Zingo or YWallet.</p><a class="btn primary wide" href="#/wallet">Open Tacit wallet</a>`
+      }
+      <p class="faint" style="font-size:13px;margin:12px 0 0">If you win you pay ${rule === "First price" ? "your bid" : "the second-highest bid (or the reserve)"}, and the rest of the bond comes back. If you don't, the whole bond comes back to your refund address.</p>`;
     const amt = bp.querySelector("#amt");
     const slider = bp.querySelector("#slider");
     slider.oninput = () => (amt.value = zec(slider.value));
@@ -565,15 +623,103 @@ async function renderAuction(m, token) {
       const v = parseZec(amt.value);
       if (v != null) slider.value = v;
     };
-    bp.querySelector("#bid").onclick = () => placeBid(terms, id, parseZec(amt.value));
+    bp.querySelectorAll(".tabs button").forEach((b) => {
+      b.onclick = () => {
+        bp.dataset.tab = b.dataset.t;
+        bidDrawn = null;
+        drawBid(phase(terms, S.info && S.info.tip));
+      };
+    });
+    const bidBtn = bp.querySelector("#bid");
+    if (bidBtn) bidBtn.onclick = () => placeBid(terms, id, parseZec(amt.value));
+    const plugBtn = bp.querySelector("#plug-go");
+    if (plugBtn) {
+      plugBtn.onclick = () => extensionBid(terms, vault, parseZec(amt.value), plugBtn);
+      extBalance(EXT).then((v) => {
+        const el = bp.querySelector("#ext-bal");
+        if (el) el.textContent = v == null ? "connect to see" : `${zec(v)} ${unit()}`;
+      });
+    }
+    const extBtn = bp.querySelector("#ext-go");
+    if (extBtn) extBtn.onclick = () => externalBid(terms, vault, parseZec(amt.value), bp.querySelector("#refund").value, bp.querySelector("#ext-out"));
   };
 
   view.querySelector("#run-audit").onclick = () => runAudit(terms, id);
+  // An extension can inject after the page has drawn; show its tab when it does.
+  document.addEventListener(
+    "tacit:ext",
+    () => {
+      if (!current(token)) return;
+      bidDrawn = null;
+      draw();
+    },
+    { once: true },
+  );
   draw();
   every(15000, async () => {
     await refreshChain();
     if (current(token)) draw();
   });
+}
+
+// Bidding from any Zcash wallet: the bid is sealed here, then handed to the
+// wallet as a ZIP 321 payment request for the bond with the sealed memo.
+async function externalBid(terms, vault, amount, refund, out) {
+  if (amount == null || amount < terms.reserve || amount > terms.bond) {
+    toast(`Bid between ${zec(terms.reserve)} and ${zec(terms.bond)} ${unit()}`, "error");
+    return;
+  }
+  if (!refund.trim()) {
+    toast("Paste a shielded address from your wallet, for the refund", "error");
+    return;
+  }
+  try {
+    const memoHex = await call("sealBidMemo", { terms, amount, refundAddress: refund.trim() });
+    // Wallets pad memos with zeros, so trailing zeros needn't be in the URI.
+    const bytes = Uint8Array.from(memoHex.match(/../g).map((b) => parseInt(b, 16)));
+    let end = bytes.length;
+    while (end > 0 && bytes[end - 1] === 0) end--;
+    const b64 = btoa(String.fromCharCode(...bytes.slice(0, end))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    const uri = `zcash:${vault}?amount=${zec(terms.bond)}&memo=${b64}`;
+    out.innerHTML = `
+      <div class="notice good" style="margin-top:14px">Sealed. Scan with your wallet, or open the link on this device. Send exactly ${zec(terms.bond)} ${unit()} with the memo unchanged.</div>
+      <div class="qr">${qrSvg(uri)}</div>
+      <div class="row" style="margin-top:10px"><a class="btn small primary" href="${esc(uri)}">Open in wallet ↗</a><button class="btn small" id="cp-uri">Copy request</button></div>`;
+    out.querySelector("#cp-uri").onclick = () => copy(uri);
+    addBid({ auction: terms && (await call("auctionId", { terms })), item: terms.item, amount, txid: "external wallet", refundIndex: null, time: Date.now() });
+  } catch (e) {
+    toast(e.message, "error");
+  }
+}
+
+// Bidding through an extension wallet: one click here, one approval there.
+// The bid is sealed in this tab and travels as the text form of the memo.
+async function extensionBid(terms, vault, amount, btn) {
+  if (amount == null || amount < terms.reserve || amount > terms.bond) {
+    toast(`Bid between ${zec(terms.reserve)} and ${zec(terms.bond)} ${unit()}`, "error");
+    return;
+  }
+  const label = btn.textContent;
+  btn.disabled = true;
+  let step = "connect";
+  try {
+    btn.textContent = `Connecting ${EXT.name}…`;
+    const acct = await extConnect(EXT);
+    step = "seal";
+    btn.textContent = "Sealing your bid…";
+    const memo = await call("sealBidMemo", { terms, amount, refundAddress: acct.shielded, text: true });
+    step = "send";
+    btn.textContent = `Approve in ${EXT.name}…`;
+    const txid = await extSend(EXT, { to: vault, amountZat: terms.bond, memo });
+    addBid({ auction: await call("auctionId", { terms }), item: terms.item, amount, txid: txid || EXT.name, refundIndex: null, time: Date.now() });
+    toast(`Sealed bid sent${txid ? ` · ${short(txid, 6)}` : ""}`, "good");
+    btn.textContent = "Bid placed ✓";
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = label;
+    const why = e && e.message ? e.message : String(e);
+    toast(step === "seal" ? `${EXT.name}'s shielded address can't receive this auction's refund: ${why}` : why, "error");
+  }
 }
 
 async function placeBid(terms, id, amount) {
@@ -713,7 +859,9 @@ async function renderWallet(_, token) {
           <div class="row between"><h2 style="margin:0">Receive</h2><div class="tabs"><button class="on" data-a="0">Main address</button><button data-a="fresh">Fresh address</button></div></div>
           <p class="muted" style="margin:10px 0">A shielded Ironwood address. Every fresh address is unlinkable to the others.</p>
           <div class="addr" id="addr">${esc(w.address)}</div>
-          <div class="row" style="margin-top:12px"><button class="btn small" id="copy">Copy</button><a class="btn small" href="#/fund">Fund from another chain →</a>${S.net === "test" ? `<a class="btn small ghost" href="https://testnet.zecfaucet.com" target="_blank" rel="noopener">Testnet faucet ↗</a>` : ""}</div>
+          <div class="qr" id="addr-qr">${qrSvg(w.address)}</div>
+          <div class="row" style="margin-top:12px"><button class="btn small" id="copy">Copy</button><a class="btn small" href="#/fund">Fund from another chain →</a>${S.net !== "main" ? `<button class="btn small primary" id="drip">Get free ${unit()}</button>` : ""}</div>
+          <div id="drip-out"></div>
         </div>
         <div class="panel">
           <h2>Send</h2>
@@ -726,6 +874,16 @@ async function renderWallet(_, token) {
         </div>
       </div>
       <div>
+        <div class="panel" id="ext-panel">
+          <h2>Extension wallet</h2>
+          ${
+            EXT
+              ? `<p class="muted">${esc(EXT.name)} is installed. Connect it to bid and pay escrow from it directly, or top up this wallet from it.</p>
+                 <div id="ext-body"><button class="btn primary" id="ext-connect">Connect ${esc(EXT.name)}</button></div>`
+              : `<p class="muted">Already use a Zcash browser extension? Install one with dApp support and Tacit connects to it for bids and escrow payments.</p>
+                 <div class="row" style="flex-wrap:wrap">${EXTENSIONS.map((x) => `<a class="btn small" href="${x.url}" target="_blank" rel="noopener">Get ${esc(x.name)} ↗</a>`).join("")}</div>`
+          }
+        </div>
         <div class="panel">
           <h2>My bids</h2>
           ${bids.length ? `<table><tbody>${bids.map((b) => `<tr><td><a href="#/auction/${b.auction}">${esc(b.item)}</a><div class="faint mono" style="font-size:12px">${b.txid.slice(0, 16)}…</div></td><td class="num">${zec(b.amount)} ${unit()}</td></tr>`).join("")}</tbody></table>` : `<p class="muted">No bids yet. <a href="#/">Browse the market</a>.</p>`}
@@ -742,9 +900,66 @@ async function renderWallet(_, token) {
   view.querySelectorAll(".tabs button").forEach((b) => {
     b.onclick = async () => {
       view.querySelectorAll(".tabs button").forEach((x) => x.classList.toggle("on", x === b));
-      view.querySelector("#addr").textContent = b.dataset.a === "0" ? w.address : await call("address", { index: 1000 + Math.floor(Math.random() * 1e6) });
+      const a = b.dataset.a === "0" ? w.address : await call("address", { index: 1000 + Math.floor(Math.random() * 1e6) });
+      view.querySelector("#addr").textContent = a;
+      view.querySelector("#addr-qr").innerHTML = qrSvg(a);
     };
   });
+  // A connected extension wallet: its address, balance, and a top-up into
+  // this Tacit wallet.
+  const extConnectBtn = view.querySelector("#ext-connect");
+  if (extConnectBtn)
+    extConnectBtn.onclick = async () => {
+      extConnectBtn.disabled = true;
+      try {
+        const acct = await extConnect(EXT);
+        const bal = await extBalance(EXT);
+        const body = view.querySelector("#ext-body");
+        body.innerHTML = `
+          <dl class="kv" style="margin:6px 0 14px"><dt>Shielded address</dt><dd class="mono">${esc(short(acct.shielded, 12))}</dd><dt>Balance</dt><dd>${bal == null ? "unknown" : `${zec(bal)} ${unit()}`}</dd></dl>
+          <div class="row"><div class="input-suffix" style="flex:1"><input id="topup-amt" inputmode="decimal" placeholder="0.0" /><b>${unit()}</b></div><button class="btn primary" id="topup">Top up Tacit</button></div>`;
+        body.querySelector("#topup").onclick = async (e) => {
+          const btn = e.currentTarget;
+          const amt = parseZec(body.querySelector("#topup-amt").value);
+          if (!amt) return toast("Enter an amount", "error");
+          btn.disabled = true;
+          btn.textContent = `Approve in ${EXT.name}…`;
+          try {
+            await extSend(EXT, { to: w.address, amountZat: amt, memo: "" });
+            toast("Sent. It shows up here after the next block.", "good");
+            btn.textContent = "Sent ✓";
+            setTimeout(() => syncWallet(true).then(() => current(token) && route()), 40000);
+          } catch (err) {
+            btn.disabled = false;
+            btn.textContent = "Top up Tacit";
+            toast(err.message || String(err), "error");
+          }
+        };
+      } catch (e) {
+        extConnectBtn.disabled = false;
+        toast(e.message || String(e), "error");
+      }
+    };
+  // Tacit's own testnet faucet: one tap, shielded coins in about a minute.
+  const drip = view.querySelector("#drip");
+  if (drip)
+    drip.onclick = async () => {
+      drip.disabled = true;
+      const out = view.querySelector("#drip-out");
+      out.innerHTML = `<p class="muted" style="margin:12px 0 0"><span class="spinner" style="display:inline-block;vertical-align:middle"></span> Sending shielded ${unit()} from the Tacit faucet…</p>`;
+      try {
+        const r = await api("/v1/faucet/drip", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ address: w.address }),
+        });
+        out.innerHTML = `<div class="notice good" style="margin-top:12px">${zec(r.amount)} ${unit()} is on its way. It shows up after the next block (about 25 seconds on testnet).</div>`;
+        setTimeout(() => syncWallet(true).then(() => current(token) && route()), 40000);
+      } catch (e) {
+        out.innerHTML = `<div class="notice warn" style="margin-top:12px">${esc(e.message)}</div>`;
+        drip.disabled = false;
+      }
+    };
   view.querySelector("#sync").onclick = async () => {
     const b = busy("Syncing");
     try {
@@ -833,7 +1048,7 @@ function renderUnlock(rec, token) {
   view.querySelector("#go").onclick = go;
   view.querySelector("#pass").onkeydown = (e) => e.key === "Enter" && go();
   view.querySelector("#forget").onclick = () => {
-    const m = modal(`<h2>Remove wallet?</h2><p class="muted">This deletes the encrypted wallet from this browser. You can only get your funds back with the 24 word recovery phrase.</p>
+    const m = modal(`<h2>Remove wallet?</h2><p class="muted">This deletes the encrypted wallet from this browser. You can only get your funds back with your recovery phrase.</p>
       <div class="row"><span class="spacer"></span><button class="btn ghost" data-close>Cancel</button><button class="btn" id="yes">Remove</button></div>`);
     m.querySelector("#yes").onclick = () => {
       storeWallet(null);
@@ -850,19 +1065,32 @@ function renderOnboard(token) {
       <h1 style="font-size:36px">Your wallet, in this tab</h1>
       <p class="muted">A Tacit wallet is a shielded Zcash wallet that runs entirely in your browser. It syncs by decrypting blocks locally and proves every transaction right here. The coordinator never sees a key or an address.</p>
       <div class="grid cols-2" style="margin-top:22px">
-        <button class="panel" id="new" style="text-align:left;cursor:pointer;color:inherit"><h3>Create a new wallet</h3><p class="muted" style="margin:0">Get a 24 word recovery phrase and a fresh shielded address.</p></button>
+        <button class="panel" id="new" style="text-align:left;cursor:pointer;color:inherit"><h3>Create a new wallet</h3><p class="muted" style="margin:0">Get a 12 or 24 word recovery phrase and a fresh shielded address.</p></button>
         <button class="panel" id="restore" style="text-align:left;cursor:pointer;color:inherit;margin-top:0"><h3>Restore</h3><p class="muted" style="margin:0">Bring back a Tacit wallet from its recovery phrase.</p></button>
       </div>
     </div>`;
   view.querySelector("#new").onclick = async () => {
-    const phrase = await call("newPhrase");
+    let phrase = await call("newPhrase", { words: 24 });
     const m = modal(`
-      <h2>Write down your recovery phrase</h2>
-      <p class="muted">These 24 words are the only way back into this wallet. Anyone who has them can spend your funds.</p>
-      <div class="phrase">${phrase.split(" ").map((w) => `<span>${w}</span>`).join("")}</div>
+      <div class="row between"><h2 style="margin:0">Write down your recovery phrase</h2>
+        <div class="tabs" id="wc"><button data-n="12">12 words</button><button class="on" data-n="24">24 words</button></div></div>
+      <p class="muted" style="margin-top:12px" id="wc-note">These 24 words are the only way back into this wallet. Anyone who has them can spend your funds.</p>
+      <div class="phrase" id="phrase">${phrase.split(" ").map((w) => `<span>${w}</span>`).join("")}</div>
       <label class="field" style="margin-top:16px"><span>Choose a passcode to lock it in this browser</span><input id="p1" type="password" autocomplete="new-password" /></label>
       <label class="row" style="margin-top:12px;gap:8px;color:var(--muted);font-size:14px"><input type="checkbox" id="ok" style="width:auto" /> I wrote the phrase down somewhere safe</label>
       <div class="row" style="margin-top:16px"><span class="spacer"></span><button class="btn ghost" data-close>Cancel</button><button class="btn primary" id="go">Create wallet</button></div>`);
+    // 12 words (128 bits) are easier to write down; 24 (256 bits) is the
+    // default. Either is far beyond brute force.
+    m.querySelectorAll("#wc button").forEach((b) => {
+      b.onclick = async () => {
+        const n = Number(b.dataset.n);
+        m.querySelectorAll("#wc button").forEach((x) => x.classList.toggle("on", x === b));
+        phrase = await call("newPhrase", { words: n });
+        m.querySelector("#phrase").innerHTML = phrase.split(" ").map((w) => `<span>${w}</span>`).join("");
+        m.querySelector("#wc-note").textContent = `These ${n} words are the only way back into this wallet. Anyone who has them can spend your funds.`;
+        m.querySelector("#ok").checked = false;
+      };
+    });
     m.querySelector("#go").onclick = async () => {
       const pass = m.querySelector("#p1").value;
       if (pass.length < 6) return toast("Use a passcode of at least 6 characters", "error");
@@ -874,7 +1102,7 @@ function renderOnboard(token) {
   view.querySelector("#restore").onclick = () => {
     const m = modal(`
       <h2>Restore a wallet</h2>
-      <label class="field"><span>Recovery phrase</span><textarea id="ph" placeholder="24 words"></textarea></label>
+      <label class="field"><span>Recovery phrase</span><textarea id="ph" placeholder="12 or 24 words"></textarea></label>
       <label class="field" style="margin-top:12px"><span>Scan from block (the block the wallet was made, or earlier)</span><input id="bh" inputmode="numeric" placeholder="${S.info.tip - 1000}" /></label>
       <label class="field" style="margin-top:12px"><span>New passcode for this browser</span><input id="p1" type="password" autocomplete="new-password" /></label>
       <div class="row" style="margin-top:16px"><span class="spacer"></span><button class="btn ghost" data-close>Cancel</button><button class="btn primary" id="go">Restore</button></div>`);
@@ -971,6 +1199,17 @@ addEventListener("keydown", (e) => e.key === "Escape" && setMega(false));
 document.getElementById("menu-btn").onclick = () => document.body.classList.toggle("menu-open");
 mountTicker(document.getElementById("ticker"), ["TACIT · SEALED MARKETS ON ZCASH", "TESTNET LIVE", "SHIELDS UP"]);
 document.querySelectorAll(".wordmark").forEach((w) => w.parentElement.addEventListener("mouseenter", () => scramble(w, { duration: 500 })));
+
+// In-page anchors ("#story") scroll instead of routing.
+document.addEventListener("click", (e) => {
+  const a = e.target.closest('a[href^="#"]');
+  if (!a || a.getAttribute("href").startsWith("#/")) return;
+  const target = document.getElementById(a.getAttribute("href").slice(1));
+  if (!target) return;
+  e.preventDefault();
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  window.scrollTo({ top: target.getBoundingClientRect().top + scrollY - 70, behavior: reduce ? "auto" : "smooth" });
+});
 
 window.addEventListener("hashchange", route);
 refreshChain().then(route);

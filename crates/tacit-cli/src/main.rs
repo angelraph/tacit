@@ -6,6 +6,7 @@
 //! sealed envelopes; the coordinator can't read or forge anything.
 
 mod agent;
+mod faucet;
 mod home;
 mod market;
 mod net;
@@ -75,6 +76,15 @@ enum Cmd {
         /// Name shown to sellers choosing seats.
         #[arg(long, default_value = "Tacit agent")]
         name: String,
+    },
+    /// Run a testnet faucet that drips this home's coins to anyone, at most
+    /// once a day per address and per IP. The coordinator relays it.
+    Faucet {
+        #[arg(long, default_value = "127.0.0.1:8091")]
+        listen: String,
+        /// TAZ per drip.
+        #[arg(long, default_value = "0.05")]
+        amount: String,
     },
     /// As an arbiter, rule for the requester of an escrow dispute by
     /// cosigning the payout they asked for in `room`.
@@ -210,6 +220,7 @@ async fn run(cli: Cli) -> Result<()> {
         Cmd::Bid { auction, amount } => market::bid(&home, &auction, &amount).await,
         Cmd::Agent { role, name } => agent::run(&home, role, name).await,
         Cmd::Decide { room } => agent::decide(&home, &room).await,
+        Cmd::Faucet { listen, amount } => faucet::run(&home, listen, amount).await,
     }
 }
 

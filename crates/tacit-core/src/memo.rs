@@ -13,6 +13,8 @@
 //! auction id is repeated, which stops anyone from lifting a sealed bid out of
 //! one auction and replaying it into another.
 
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+
 use crate::seal::{self, SealError};
 
 pub const MEMO_LEN: usize = 512;
@@ -121,7 +123,20 @@ impl SealedBid {
         w.put(&self.sealed);
         memo
     }
+
+    /// The same memo as printable text, for wallets whose send API only
+    /// takes a UTF-8 memo (browser extensions such as Noir). About 380 bytes,
+    /// well inside the 512 a memo holds.
+    pub fn to_text_memo(&self) -> String {
+        let memo = self.to_memo();
+        let used = PREFIX.len() + 2 + 32 + 2 + self.sealed.len();
+        format!("{TEXT_PREFIX}{}", URL_SAFE_NO_PAD.encode(&memo[..used]))
+    }
 }
+
+/// Marks the text form of a Tacit memo: this prefix, then base64url of the
+/// binary memo without its zero padding.
+const TEXT_PREFIX: &str = "TACIT1:";
 
 /// Anything Tacit writes into a memo.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -131,6 +146,14 @@ pub enum TacitMemo {
 
 impl TacitMemo {
     pub fn parse(memo: &[u8]) -> Result<Self, MemoError> {
+        if let Some(text) = memo.strip_prefix(TEXT_PREFIX.as_bytes()) {
+            let end = text.iter().position(|&b| b == 0).unwrap_or(text.len());
+            let binary = URL_SAFE_NO_PAD.decode(&text[..end]).map_err(|_| MemoError::Truncated)?;
+            if binary.first() != Some(&0xF5) {
+                return Err(MemoError::NotTacit);
+            }
+            return Self::parse(&binary);
+        }
         let mut r = Reader(memo);
         if r.take(PREFIX.len())? != PREFIX {
             return Err(MemoError::NotTacit);
@@ -209,6 +232,17 @@ mod tests {
         let TacitMemo::SealedBid(parsed) = TacitMemo::parse(&memo).unwrap();
         assert_eq!(parsed.auction, [9; 32]);
         assert_eq!(parsed.close_round(), ROUND);
+        assert_eq!(parsed.open(&beacon()).unwrap(), bid());
+    }
+
+    #[test]
+    fn the_text_form_parses_like_the_binary_one() {
+        let sealed = SealedBid::seal(&bid(), ROUND).unwrap();
+        let text = sealed.to_text_memo();
+        assert!(text.len() <= MEMO_LEN, "{} bytes", text.len());
+        let mut memo = [0u8; MEMO_LEN];
+        memo[..text.len()].copy_from_slice(text.as_bytes());
+        let TacitMemo::SealedBid(parsed) = TacitMemo::parse(&memo).unwrap();
         assert_eq!(parsed.open(&beacon()).unwrap(), bid());
     }
 

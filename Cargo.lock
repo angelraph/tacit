@@ -2976,6 +2976,7 @@ name = "tacit-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "axum",
  "clap",
  "hex",
  "pczt",
@@ -3008,6 +3009,7 @@ dependencies = [
  "tonic",
  "tower",
  "tower-http",
+ "ureq",
  "zcash_client_backend",
 ]
 
@@ -3019,6 +3021,7 @@ dependencies = [
  "ark-ec",
  "ark-ff",
  "ark-serialize",
+ "base64 0.22.1",
  "blake2b_simd",
  "chacha20poly1305",
  "hex",
@@ -3111,6 +3114,7 @@ dependencies = [
  "zcash_keys",
  "zcash_primitives",
  "zcash_protocol",
+ "zcash_transparent",
  "zip32",
  "zip321",
 ]
@@ -4137,8 +4141,6 @@ dependencies = [
 [[package]]
 name = "zcash_protocol"
 version = "0.10.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b20adb1cdb6ab551e83d1507461e89b41fc67e800eec9e59e0c8de96152e8c5c"
 dependencies = [
  "corez",
  "document-features",
