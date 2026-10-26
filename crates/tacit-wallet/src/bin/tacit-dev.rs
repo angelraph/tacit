@@ -27,6 +27,10 @@
 //!       in one transaction signed by seller and operator, and an auditor
 //!       holding nothing but the published terms verifies the result.
 //!
+//!   tacit-dev vector <gateway> <auction id>
+//!       Prints a settled auction as a test vector (terms, deposits, beacon
+//!       and the on-chain payout) for tacit-core's conformance test.
+//!
 //!   tacit-dev light-e2e
 //!       The web app's wallet code (tacit-light) run natively through the
 //!       coordinator's JSON chain gateway: sync, a sealed bid, an audit from
@@ -694,6 +698,80 @@ fn scan_check(gateway: &str, auction: &str) {
     println!("scan check passed");
 }
 
+/// Freezes a settled auction into a test vector: its terms, the deposits as
+/// the settlement rules take them, the drand beacon, and what the settlement
+/// transaction actually paid on chain. `cargo test -p tacit-core` replays it
+/// offline and must reproduce the on-chain payout exactly.
+fn vector(gateway: &str, auction: &str) {
+    use tacit_light::audit::Audit;
+    use tacit_light::chain::{Block, Info, RawTx, Tree};
+
+    let http: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(120))).build().into();
+    let get = |path: String| -> String { http.get(&format!("{gateway}{path}")).call().unwrap().body_mut().read_to_string().unwrap() };
+    let rec: serde_json::Value = serde_json::from_str(&get(format!("/v1/auctions/{auction}"))).unwrap();
+    let terms: tacit_core::auction::Terms = serde_json::from_value(rec["terms"].clone()).unwrap();
+    let tip = serde_json::from_str::<Info>(&get("/v1/chain/info".into())).unwrap().tip;
+    let tree = |h: u64| -> Tree { serde_json::from_str(&get(format!("/v1/chain/tree/{h}"))).unwrap() };
+    let mut audit = Audit::new(terms.clone(), &tree(terms.created_height as u64)).unwrap();
+    let mut h = audit.height() as u64;
+    while h < tip {
+        let to = tip.min(h + 400);
+        let blocks: Vec<Block> = serde_json::from_str(&get(format!("/v1/chain/blocks?from={}&to={to}", h + 1))).unwrap();
+        match audit.scanner().scan(&blocks) {
+            Ok(()) => {}
+            Err(tacit_light::Error::NeedTree(at)) => audit.scanner().set_tree(&tree(at as u64)).unwrap(),
+            Err(e) => panic!("scan: {e}"),
+        }
+        h = audit.height() as u64;
+    }
+    for txid in audit.wanted() {
+        let raw: RawTx = serde_json::from_str(&get(format!("/v1/chain/tx/{txid}"))).unwrap();
+        audit.add_tx(&txid, &raw).unwrap();
+    }
+    let round = terms.close_round;
+    let b: serde_json::Value = serde_json::from_str(
+        &http
+            .get(&format!("https://api.drand.sh/52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971/public/{round}"))
+            .call()
+            .unwrap()
+            .body_mut()
+            .read_to_string()
+            .unwrap(),
+    )
+    .unwrap();
+    let signature = b["signature"].as_str().unwrap().to_string();
+    let beacon = tacit_core::beacon::Beacon::verify(round, &hex::decode(&signature).unwrap()).unwrap();
+    let report = audit.report(Some(&beacon)).unwrap();
+    assert_eq!(report.verdict, tacit_light::audit::Verdict::Honest, "only an honestly settled auction makes a vector");
+    let settlement = report.settlement.as_ref().unwrap();
+    let net = tacit_light::Net::parse(&terms.network).unwrap();
+    let seller = tacit_light::keys::decode_raw_address(net, &terms.seller).unwrap();
+    let out = serde_json::json!({
+        "description": format!("Tacit auction {} on Zcash {}, settled in {} at height {}.", &auction[..16], terms.network, settlement.txid, settlement.height),
+        "auction_id": report.auction,
+        "terms": terms,
+        "seller_receiver": hex::encode(seller),
+        "beacon": { "round": round, "signature": signature },
+        "deposits": audit.settlement_inputs().iter().map(|d| serde_json::json!({
+            "id": hex::encode(&d.id),
+            "value": d.value,
+            "mined_height": d.mined_height,
+            "memo": hex::encode(&d.memo),
+        })).collect::<Vec<_>>(),
+        "expected": {
+            "winner": report.outcome.as_ref().and_then(|o| o.winner.clone()),
+            "price": report.outcome.as_ref().and_then(|o| o.price),
+            "fee": report.outcome.as_ref().map(|o| o.fee),
+        },
+        "on_chain": {
+            "settlement_txid": settlement.txid,
+            "height": settlement.height,
+            "payments": audit.paid().unwrap().iter().map(|(raw, v)| serde_json::json!({ "to": hex::encode(raw), "amount": v })).collect::<Vec<_>>(),
+        },
+    });
+    println!("{}", serde_json::to_string_pretty(&out).unwrap());
+}
+
 #[tokio::main]
 async fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -705,6 +783,10 @@ async fn main() {
         Some("scan-check") => scan_check(
             args.get(2).map(String::as_str).unwrap_or("https://tacit-production-6a96.up.railway.app"),
             args.get(3).map(String::as_str).expect("usage: tacit-dev scan-check <gateway> <auction id>"),
+        ),
+        Some("vector") => vector(
+            args.get(2).map(String::as_str).expect("usage: tacit-dev vector <gateway> <auction id>"),
+            args.get(3).map(String::as_str).expect("usage: tacit-dev vector <gateway> <auction id>"),
         ),
         Some("mine") => mine(args.get(2).and_then(|n| n.parse().ok()).unwrap_or(1)),
         Some("mine-every") => {

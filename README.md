@@ -2,6 +2,8 @@
 
 **Sealed-bid auctions and shielded escrow on Zcash. The price is public. The participants are not.**
 
+[![CI](https://github.com/angelraph/tacit/actions/workflows/ci.yml/badge.svg)](https://github.com/angelraph/tacit/actions/workflows/ci.yml)
+
 **Live: [Mainnet](https://tacit-mainnet.up.railway.app) · [Testnet](https://tacit-production-6a96.up.railway.app)** · [Demo video](#demo) · [Mainnet proof](https://tacit-mainnet.up.railway.app/#/proof) · [Protocol](docs/PROTOCOL.md) · [Threat model](docs/THREAT_MODEL.md) · [Release v0.9.0](https://github.com/angelraph/tacit/releases/tag/v0.9.0)
 
 <a id="demo"></a>
@@ -19,8 +21,16 @@ Built for the [Zecathon](https://thezecathon.com), Private Markets track.
 - **Live on mainnet:** our first auction with real ZEC settled on Zcash mainnet and passed the public audit.
 - **Code:** about 9,000 lines of Rust in 7 crates, a 6,000 line web app with no build step, 37 unit tests and three end-to-end harnesses.
 
+## For judges: check it in three minutes
+
+1. **Use it.** Open [Try it](https://tacit-production-6a96.up.railway.app/#/try) on testnet. It walks you from a new wallet to free testnet coins, a sealed bid on the always-open practice lot, and an audit your own browser runs. Every step ticks itself off from what really happened.
+2. **See real money.** The [mainnet Proof page](https://tacit-mainnet.up.railway.app/#/proof) audits every mainnet auction from public data. Lot #2 settled honestly at 0.001 ZEC.
+3. **Re-run mainnet offline.** `cargo test -p tacit-core --test conformance` replays that mainnet auction from [test-vectors/](test-vectors/): its terms, both sealed deposits as they sit on chain, and the drand beacon. The settlement rules must reproduce the exact payout the vault made on chain, with no network access.
+4. **Read the rules.** [docs/ZIP-DRAFT.md](docs/ZIP-DRAFT.md) specifies the format in the style of a Zcash Improvement Proposal, so any wallet or marketplace can implement it.
+
 ## Contents
 
+- [For judges: check it in three minutes](#for-judges-check-it-in-three-minutes)
 - [The idea in one minute](#the-idea-in-one-minute)
 - [Live on Zcash mainnet](#live-on-zcash-mainnet)
 - [Why Tacit](#why-tacit)
@@ -79,6 +89,19 @@ On testnet, every auction is audited live on the [Proof page](https://tacit-prod
 **Independent by design.** Agents are open: anyone can run one with two commands. Every agent says who runs it, and the Sell page tells you plainly whether any single party would hold two of a vault's three shares.
 
 **Ready for NU7.** Tacit builds against the NU7 consensus rules that went live on testnet in October, runs its own testnet faucet while the public ones wait for wallet updates, and tracks the mainnet activation at block 3,543,405.
+
+**How it compares.** A sealed auction is only as private as whoever can open it and only as safe as whoever holds the money.
+
+| | Typical online auction | Seller-held sealed bids (the escrow-as-bid design, as in ShieldBid) | Tacit |
+|---|---|---|---|
+| Who can read bids before the close | The platform, often everyone | The seller, as each payment arrives | Nobody: bids are locked to a future drand round |
+| Who holds the money | The platform | The seller alone | A fresh 2-of-3 vault; no single party can move it |
+| Can the seller shill or rig after seeing bids | Yes | Yes | No: the seller sees nothing until everyone does |
+| Who settles | The platform, by hand | The seller, by hand | Two agents that each recompute the rules, in one transaction |
+| Who can check the result | Nobody outside | Each bidder can check their own receipt in the seller's list | Anyone recomputes the whole settlement from the chain and the beacon |
+| Bid amounts after the close | Public | Clearing price and ranking published; the seller saw everything | Every bid public, every bidder hidden |
+| Number of bids while open | Public | Hidden | Visible to anyone with the terms (sizes and senders stay hidden) |
+| Bid from any wallet | n/a | Yes, the amount is the bid | Tacit wallet, Noir extension, or any wallet by QR once the page seals the bid |
 
 **Usable by anyone.** Bid from the Tacit wallet, from the Noir browser extension in one click, or from any mobile wallet by scanning a ZIP 321 payment request. Fund from BTC, ETH, SOL or USDC through NEAR Intents. Install it as an app.
 
@@ -282,6 +305,14 @@ chmod +x tacit
 
 It shows up on the [Agents page](https://tacit-production-6a96.up.railway.app/#/agents) within a minute, and sellers can pick it.
 
+On mainnet, point it at the mainnet site instead:
+
+```bash
+./tacit --network main init --server https://zec.rocks:443 \
+  --coordinator https://tacit-mainnet.up.railway.app
+./tacit --network main agent --role arbiter --name "My arbiter" --run-by "Your name"
+```
+
 ## Repository layout
 
 ```text
@@ -305,7 +336,9 @@ vendor/zcash_protocol/ zcash_protocol with the NU7 activation heights
 
 | Document | What's in it |
 |---|---|
+| [docs/ZIP-DRAFT.md](docs/ZIP-DRAFT.md) | The format as a draft Zcash Improvement Proposal, with requirements, rationale and security considerations |
 | [docs/PROTOCOL.md](docs/PROTOCOL.md) | The exact rules: terms, memo format, settlement, escrow |
+| [test-vectors/](test-vectors/) | Real settled auctions frozen from mainnet and testnet; `cargo test -p tacit-core --test conformance` replays them |
 | [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md) | What is private, what isn't, and what each party could do |
 | [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md) | The walk through, scene by scene |
 | [demo/](demo/) | How the demo video is recorded and assembled |

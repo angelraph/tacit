@@ -314,6 +314,7 @@ const routes = [
   [/^\/wallet$/, renderWallet, "wallet"],
   [/^\/fund$/, (m) => renderFund(m, ctx), "wallet"],
   [/^\/faucet$/, renderFaucet, "faucet"],
+  [/^\/try$/, renderTry, "try"],
   [/^\/how$/, renderHow, "explore"],
   [/^\/faq$/, renderFaq, "explore"],
   [/^\/agents$/, () => renderAgents(ctx), "explore"],
@@ -961,6 +962,66 @@ export async function needWallet() {
 
 // Tacit's testnet faucet as a page of its own: anyone can paste a shielded
 // testnet address and get coins, with or without a Tacit wallet.
+// The guided path: four steps from nothing to an audited sealed bid, each
+// ticked off from the real state of this browser's wallet and the chain.
+async function renderTry(_, token) {
+  safeSet("tacit.tour", "1");
+  await S.ready;
+  await refreshChain();
+  if (!current(token)) return;
+  if (!S.info) {
+    view.innerHTML = offline();
+    return;
+  }
+  const main = S.net === "main";
+  const rec = storedWallet();
+  const w = S.wallet;
+  const auctions = await loadAuctions().catch(() => []);
+  const tip = S.info.tip;
+  const open = auctions.filter((a) => phase(a.terms, tip).key === "bidding").sort((a, b) => b.terms.bids_until_height - a.terms.bids_until_height);
+  const bids = myBids();
+  const lastBid = bids[0];
+  const bidOn = lastBid && auctions.find((a) => a.id === lastBid.auction);
+  const audited = lastBid && S.settled[lastBid.auction];
+  const funded = w && w.balance > 0;
+  const done = [!!rec, funded || bids.length > 0, bids.length > 0, !!audited];
+  const at = done.indexOf(false);
+  const step = (i, title, body, action) => `
+    <li class="tour-step ${done[i] ? "done" : i === at ? "now" : ""}">
+      <span class="tour-n">${done[i] ? "✓" : i + 1}</span>
+      <div><h3>${title}</h3><p class="muted">${body}</p>${!done[i] && i === at && action ? `<div class="row" style="margin-top:12px">${action}</div>` : ""}</div>
+    </li>`;
+  const bidPhase = bidOn ? phase(bidOn.terms, tip) : null;
+  view.innerHTML = `
+    <div class="page-head reveal"><span class="eyebrow">Try it</span><h1>A sealed bid, <span class="dim">start to audit, in minutes</span></h1>
+      <p>Four steps on ${esc(netName(S.net))}. Each one ticks itself off from what really happened: your wallet, your coins, your bid on chain, and the audit your own browser runs. ${main ? "This is real ZEC." : "Testnet coins are free and worthless, so nothing here costs anything."}</p></div>
+    <ol class="tour reveal">
+      ${step(0, "Make a wallet", rec ? "Your shielded wallet lives in this tab. Its keys never leave it." : "Twelve words and a passcode. Keys are made and kept in this tab; the server never sees them.", `<a class="btn primary" href="#/wallet">Create a wallet</a>`)}
+      ${step(1, main ? "Add some ZEC" : "Get free TAZ", funded ? `You have ${zec(w.balance)} ${unit()}.` : w && w.pending ? "Coins are on their way; they show up after the next block." : main ? "A bid needs its bond plus a small fee. Send ZEC to your wallet, or fund it from another chain." : "One tap sends testnet coins from Tacit's own faucet, shielded straight to your wallet.", main ? `<a class="btn primary" href="#/fund">Fund from another chain</a><a class="btn ghost" href="#/wallet">Show my address</a>` : rec && !S.locked && w ? `<button class="btn primary" id="tour-drip">Get free ${unit()}</button>` : `<a class="btn primary" href="#/wallet">Unlock your wallet first</a>`)}
+      ${step(2, "Seal a bid", lastBid ? `You bid on <b>${esc(lastBid.item || short(lastBid.auction, 6))}</b>. It is encrypted to a future drand round: nobody can read it yet, including us.` : open.length ? `<b>${esc(open[0].terms.item)}</b> is taking bids now. Your browser proves the deposit while you read the confirmation.` : "No auction is taking bids this minute. A new practice lot opens every quarter of an hour; this page checks again on its own.", open.length ? `<a class="btn primary" href="#/auction/${open[0].id}">Bid on it</a>` : `<a class="btn ghost" href="#/market">Open the market</a>`)}
+      ${step(3, "Watch it settle, then audit it", audited ? `Your browser audited it: <b>${esc(audited)}</b>. The vault paid exactly what the rules require, checked from public data alone.` : bidPhase ? `${bidPhase.key === "open" ? "The bids are open. The agents settle within a few blocks; then run the audit in your own tab." : `Bids unseal in about ${Math.max(1, Math.round(bidPhase.secs / 60))} min, all at once, when drand publishes round ${bidOn.terms.close_round}.`}` : "When the round is published, every bid opens at the same moment, the agents cosign one shielded payout, and anyone can check it.", lastBid ? `<a class="btn primary" href="#/auction/${lastBid.auction}">Open your auction</a><a class="btn ghost" href="#/proof">See every audit</a>` : "")}
+    </ol>
+    ${at === -1 ? `<div class="panel reveal" style="margin-top:22px"><h3>That's the whole loop</h3><p class="muted">You sealed a bid nobody could read, two independent agents settled it from a 2-of-3 vault, and your own browser proved the payout honest. Next: <a href="#/sell">sell something</a>, <a href="#/escrow">try an escrow</a>, or <a href="#/agents">run an agent</a>.</p></div>` : ""}`;
+  const drip = view.querySelector("#tour-drip");
+  if (drip)
+    drip.onclick = async () => {
+      drip.disabled = true;
+      try {
+        const r = await postJson("/v1/faucet/drip", { address: w.address });
+        toast(`${zec(r.amount)} ${unit()} on its way. It arrives after the next block.`);
+        setTimeout(() => syncWallet(true).then(() => current(token) && route()), 40000);
+      } catch (e) {
+        toast(e.message, "error");
+        drip.disabled = false;
+      }
+    };
+  every(15000, async () => {
+    if (!current(token)) return;
+    if (S.wallet) await syncWallet(true);
+    if (current(token)) route();
+  });
+}
+
 async function renderFaucet(_, token) {
   await S.ready;
   await refreshChain();

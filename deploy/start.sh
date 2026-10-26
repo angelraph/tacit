@@ -42,6 +42,31 @@ for role in operator arbiter; do
   /app/bin/tacit --network "$NET" --home "$home" agent --role "$role" --name "$name" --run-by Tacit &
 done
 
+# On testnet, keep a practice lot open at all times so anyone (a judge, a
+# first-time visitor) can seal a bid with faucet coins and watch it settle.
+# Every lot is a fresh vault shared with the two agents above. Nothing is
+# shipped to the winner; the item says so.
+if [ "$NET" != "main" ] && [ "${TACIT_PRACTICE_LOTS:-1}" = "1" ]; then
+  (
+    hh="$DATA/house"
+    if [ ! -f "$hh/config.json" ]; then
+      /app/bin/tacit --network "$NET" --home "$hh" init --server "$TACIT_LIGHTWALLETD" --coordinator "$COORD" > /dev/null 2>&1
+    fi
+    sleep 90
+    op=$(/app/bin/tacit --network "$NET" --home "$DATA/operator" seat)
+    ar=$(/app/bin/tacit --network "$NET" --home "$DATA/arbiter" seat)
+    while true; do
+      name="practice-$(date +%s)"
+      if timeout 600 /app/bin/tacit --network "$NET" --home "$hh" vault new "$name" --seats "me,$op,$ar"; then
+        timeout 300 /app/bin/tacit --network "$NET" --home "$hh" auction create --vault "$name" \
+          --item "Practice lot $(date -u +%H:%M) UTC: try a sealed bid with free testnet coins (nothing is shipped)" \
+          --reserve 0.0001 --bond 0.001 --bid-blocks "${TACIT_PRACTICE_BLOCKS:-48}" --close-in "${TACIT_PRACTICE_CLOSE:-1500}" || true
+      fi
+      sleep "${TACIT_PRACTICE_EVERY:-900}"
+    done
+  ) &
+fi
+
 # If any process dies, exit so the platform restarts the container.
 wait -n 2>/dev/null || wait
 exit 1

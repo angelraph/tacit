@@ -1,0 +1,70 @@
+# Every push and pull request: unit tests, the mainnet conformance replay,
+# the WebAssembly wallet build, release binaries with their SHA-256 sums, and
+# a syntax check of the web app.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Tests and conformance vectors
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Unit tests, threshold signing tests, and replay of settled mainnet and testnet auctions
+        run: cargo test --workspace --exclude tacit-wasm --locked
+
+  wasm:
+    name: Browser wallet (WebAssembly)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: Build the single-threaded wallet the web app loads
+        env:
+          CC_wasm32_unknown_unknown: clang
+          AR_wasm32_unknown_unknown: llvm-ar
+          RUSTFLAGS: --cfg getrandom_backend="wasm_js" --cfg zcash_unstable="nu7"
+        run: cargo build --release -p tacit-wasm --target wasm32-unknown-unknown --locked
+
+  release:
+    name: Linux release binaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build tacit and tacit-coordinator
+        run: cargo build --release -p tacit-cli -p tacit-coordinator --locked
+      - name: SHA-256 sums
+        run: |
+          mkdir dist
+          cp target/release/tacit target/release/tacit-coordinator dist/
+          cd dist && sha256sum tacit tacit-coordinator | tee SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tacit-linux-x86_64
+          path: dist/
+
+  web:
+    name: Web app
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Every script parses
+        run: for f in web/*.js; do node --check "$f" || exit 1; done

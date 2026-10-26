@@ -23,3 +23,8 @@ serde = { version = "1", features = ["derive"], optional = true }
 
 [features]
 serde = ["dep:serde"]
+
+[dev-dependencies]
+# The conformance test reads terms from JSON test vectors.
+tacit-core = { path = ".", features = ["serde"] }
+serde_json = "1"

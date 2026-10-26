@@ -147,18 +147,28 @@ impl Audit {
         self.scanner.fvk().scope_for_address(addr) == Some(Scope::Internal)
     }
 
-    /// Everything known so far. Pass the beacon for the closing round once
-    /// it exists to open the bids and check the settlement.
-    pub fn report(&self, beacon: Option<&Beacon>) -> Result<Report> {
-        let deposits: Vec<Deposit> = self
-            .deposits()
+    /// The deposits exactly as the settlement rules take them, memos
+    /// included once their transactions have been read.
+    pub fn settlement_inputs(&self) -> Vec<Deposit> {
+        self.deposits()
             .map(|f| Deposit {
                 id: f.deposit_id(),
                 value: f.value(),
                 mined_height: f.height,
                 memo: self.memos.get(&f.deposit_id()).cloned().unwrap_or_default(),
             })
-            .collect();
+            .collect()
+    }
+
+    /// What the settlement transaction paid, as raw receivers, once read.
+    pub fn paid(&self) -> Option<&[([u8; 43], u64)]> {
+        self.paid.as_deref()
+    }
+
+    /// Everything known so far. Pass the beacon for the closing round once
+    /// it exists to open the bids and check the settlement.
+    pub fn report(&self, beacon: Option<&Beacon>) -> Result<Report> {
+        let deposits = self.settlement_inputs();
         let auction_id = self.terms.id();
         let mut rows: Vec<DepositRow> = deposits
             .iter()
