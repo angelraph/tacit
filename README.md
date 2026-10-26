@@ -19,7 +19,7 @@ Built for the [Zecathon](https://thezecathon.com), Private Markets track.
 - **Public audit:** the vault's viewing key is published, so any browser can check the payout to the zatoshi without learning who took part.
 - **Runs in your browser:** an Ironwood light wallet compiled to WebAssembly. Keys, syncing and zero-knowledge proofs never leave the tab.
 - **Live on mainnet:** our first auction with real ZEC settled on Zcash mainnet and passed the public audit.
-- **Code:** about 9,000 lines of Rust in 7 crates, a 6,000 line web app with no build step, 37 unit tests and three end-to-end harnesses.
+- **Code:** about 9,000 lines of Rust in 7 crates, a 6,000 line web app with no build step, 41 tests, three end-to-end harnesses, and an offline replay of real mainnet and testnet settlements.
 
 ## For judges: check it in three minutes
 
