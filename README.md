@@ -121,7 +121,7 @@ On testnet, every auction is audited live on the [Proof page](https://tacit-prod
 ## How it works
 
 ```mermaid
-flowchart LR
+flowchart TD
     S[Seller's browser] -->|FROST key generation| V[(2-of-3 vault<br/>Ironwood address)]
     O[Operator agent] -->|key share| V
     A[Arbiter agent] -->|key share| V
@@ -172,36 +172,20 @@ sequenceDiagram
 ## Architecture
 
 ```mermaid
-flowchart TB
-    subgraph Browser
-      UI[Web app<br/>plain ES modules]
-      W[Wallet worker<br/>tacit-wasm]
-      P[Prover worker<br/>threaded tacit-wasm]
-      UI --> W
-      UI --> P
-    end
-    subgraph Coordinator
-      REG[Auction and escrow registry]
-      MB[Sealed seat mailboxes]
-      GW[Chain gateway<br/>+ block cache]
-      PR[Proof auditor]
-      FA[Faucet relay]
-    end
-    AG[tacit agents<br/>operator and arbiter]
-    LWD[lightwalletd]
-    DR[drand quicknet]
-    NI[NEAR Intents 1Click]
-    W <--> GW
-    P <--> GW
-    UI <--> REG
-    UI <--> MB
-    AG <--> MB
-    AG <--> LWD
-    GW <--> LWD
-    PR --> GW
-    UI --> DR
-    AG --> DR
-    UI --> NI
+flowchart LR
+    B["Browser<br/>web app + two WebAssembly workers<br/>(wallet, prover)"]
+    C["Coordinator<br/>registry, sealed mailboxes,<br/>chain gateway + block cache,<br/>proof auditor, faucet relay"]
+    G["Agents<br/>operator and arbiter"]
+    L[(lightwalletd<br/>Zcash Ironwood)]
+    D[drand quicknet]
+    N[NEAR Intents]
+    B <-->|JSON| C
+    G <-->|sealed envelopes| C
+    C <-->|gRPC| L
+    G <-->|gRPC| L
+    D -->|beacons| B
+    D -->|beacons| G
+    B -.->|fund from any chain| N
 ```
 
 | Component | What it does |
