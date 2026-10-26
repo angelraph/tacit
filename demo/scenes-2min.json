@@ -1,0 +1,52 @@
+{
+  "name": "2min",
+  "voice": "en-US-AndrewMultilingualNeural",
+  "rate": "+6%",
+  "max_speed": 2.6,
+  "scenes": [
+    {
+      "id": "intro",
+      "say": "This is Tacit. Sealed bid auctions and shielded escrow on Zcash. The price is public. The bidders are not."
+    },
+    {
+      "id": "problem",
+      "say": "Every auction on a public chain leaks. Bids get sniped and buyers get tracked. And Zcash has no smart contracts, so fair markets needed a middleman you had to trust. Tacit fixes both."
+    },
+    {
+      "id": "landing",
+      "say": "Tacit runs in your browser, on mainnet and testnet, built on drand timelock encryption and two of three FROST vaults on Ironwood."
+    },
+    {
+      "id": "wallet",
+      "say": "Make a wallet with a recovery phrase and a passcode. It syncs by decrypting blocks locally, so the server never learns which coins are yours."
+    },
+    {
+      "id": "sell",
+      "say": "A seller sets a reserve, a bond and a bidding window. Their browser, an operator and an arbiter create a fresh vault, one key share each, and Tacit shows exactly who could move the money."
+    },
+    {
+      "id": "bid",
+      "say": "Every bidder deposits the same bond, so the chain shows nothing about amounts. The bid is encrypted to a future drand round, so nobody can open it early, not even us."
+    },
+    {
+      "id": "settle",
+      "say": "When the round is published, every bid opens at once. The agents recompute the winner and cosign one shielded payout, and your browser audits every step. Settled honestly."
+    },
+    {
+      "id": "proof",
+      "say": "The proof page audits every auction in public. And our first auction with real ZEC has settled on mainnet, and passed the same audit."
+    },
+    {
+      "id": "escrow",
+      "say": "The same vaults power escrow. The buyer pays in and releases when the deal is done, and nobody on chain can tell it was an escrow."
+    },
+    {
+      "id": "agents",
+      "say": "Anyone can be an arbiter. One binary, two commands. The more independent agents, the stronger every market gets."
+    },
+    {
+      "id": "outro",
+      "say": "Tacit. Sealed markets on Zcash. Open source, live today. Audit it yourself."
+    }
+  ]
+}

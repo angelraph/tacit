@@ -6,9 +6,14 @@ until the narration ends. Then join every scene and lay a quiet generated
 music bed under the whole thing.
 
     python build.py            # out/tacit-demo.mp4
+    python build.py --spec scenes-2min.json   # out/tacit-demo-2min.mp4
+
+A named spec reads out/voice-<name> and out/timing-<name>.json (see voice.py)
+and may set "max_speed": how much faster than life its footage may play.
 """
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 import imageio_ffmpeg
@@ -37,14 +42,14 @@ def keep_ranges(length, cuts):
     return out
 
 
-def scene_clip(sid, voice_len):
+def scene_clip(sid, voice_len, voice_dir, clip_dir, max_speed):
     meta = json.loads((OUT / "raw" / f"{sid}.json").read_text())
     ranges = keep_ranges(meta["length"], meta["cuts"])
     kept = sum(b - a for a, b in ranges)
-    # Footage longer than the narration plays a little faster (at most 1.7x)
-    # rather than losing its ending; whatever is still left over is trimmed.
+    # Footage longer than the narration plays a little faster (at most
+    # max_speed) rather than losing its ending; whatever is left over is trimmed.
     target = voice_len + LEAD + 1.2
-    speed = min(1.7, kept / target) if kept > target + 1.3 else 1.0
+    speed = min(max_speed, kept / target) if kept > target + 1.3 else 1.0
     dur = max(voice_len + LEAD + 0.5, min(kept / speed, voice_len + LEAD + 2.5))
     parts = "".join(
         f"[0:v]trim=start={a:.3f}:end={b:.3f},setpts=PTS-STARTPTS[p{i}];" for i, (a, b) in enumerate(ranges)
@@ -57,10 +62,10 @@ def scene_clip(sid, voice_len):
         f"fade=t=in:st=0:d=0.35,fade=t=out:st={dur - 0.35:.3f}:d=0.35,format=yuv420p[v];"
         f"[1:a]adelay={int(LEAD * 1000)}|{int(LEAD * 1000)},apad,atrim=duration={dur:.3f}[a]"
     )
-    out = OUT / "clips" / f"{sid}.mp4"
+    out = clip_dir / f"{sid}.mp4"
     out.parent.mkdir(exist_ok=True)
     run([
-        "-i", str(OUT / "raw" / f"{sid}.webm"), "-i", str(OUT / "voice" / f"{sid}.mp3"),
+        "-i", str(OUT / "raw" / f"{sid}.webm"), "-i", str(voice_dir / f"{sid}.mp3"),
         "-filter_complex", vf, "-map", "[v]", "-map", "[a]",
         "-c:v", "libx264", "-preset", "medium", "-crf", "17", "-r", str(FPS),
         "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2", str(out),
@@ -68,9 +73,9 @@ def scene_clip(sid, voice_len):
     return out, dur
 
 
-def music(total):
+def music(total, tag):
     """A soft, slowly breathing pad: three detuned sine chords, low passed."""
-    out = OUT / "music.wav"
+    out = OUT / f"music{tag}.wav"
     chord = "+".join(
         f"0.05*sin(2*PI*{f}*t)*(0.6+0.4*sin(2*PI*{lfo}*t))"
         for f, lfo in [(110, 0.05), (164.81, 0.07), (220.5, 0.04), (277.18, 0.06), (329.63, 0.03)]
@@ -83,25 +88,28 @@ def music(total):
     return out
 
 
-def main():
-    spec = json.loads((HERE / "scenes.json").read_text(encoding="utf-8"))
-    timing = json.loads((OUT / "timing.json").read_text())
+def main(spec_file):
+    spec = json.loads((HERE / spec_file).read_text(encoding="utf-8"))
+    tag = f"-{spec['name']}" if spec.get("name") else ""
+    timing = json.loads((OUT / f"timing{tag}.json").read_text())
+    voice_dir, clip_dir = OUT / f"voice{tag}", OUT / f"clips{tag}"
+    max_speed = spec.get("max_speed", 1.7)
     clips, total = [], 0.0
     for scene in spec["scenes"]:
         sid = scene["id"]
         if not (OUT / "raw" / f"{sid}.webm").exists():
             print(f"skipping {sid}: not recorded yet")
             continue
-        clip, dur = scene_clip(sid, timing[sid])
+        clip, dur = scene_clip(sid, timing[sid], voice_dir, clip_dir, max_speed)
         clips.append(clip)
         total += dur
         print(f"{sid:>8}  {dur:5.1f} s")
-    listing = OUT / "clips.txt"
+    listing = OUT / f"clips{tag}.txt"
     listing.write_text("".join(f"file '{c.as_posix()}'\n" for c in clips))
-    joined = OUT / "joined.mp4"
+    joined = OUT / f"joined{tag}.mp4"
     run(["-f", "concat", "-safe", "0", "-i", str(listing), "-c", "copy", str(joined)])
-    bed = music(total)
-    final = OUT / "tacit-demo.mp4"
+    bed = music(total, tag)
+    final = OUT / f"tacit-demo{tag}.mp4"
     run([
         "-i", str(joined), "-i", str(bed),
         "-filter_complex", "[1:a]volume=0.35[m];[0:a][m]amix=inputs=2:duration=first:dropout_transition=0[a]",
@@ -110,4 +118,5 @@ def main():
     print(f"{final} ({total:.1f} s)")
 
 
-main()
+args = sys.argv[1:]
+main(args[1] if args[:1] == ["--spec"] else "scenes.json")

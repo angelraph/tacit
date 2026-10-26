@@ -4,6 +4,10 @@ scene exactly as long as its narration.
 
     python voice.py            # every scene
     python voice.py bid ways   # just these
+    python voice.py --spec scenes-2min.json   # a shorter cut, kept apart
+
+A spec with a "name" keeps its clips in out/voice-<name> and its lengths in
+out/timing-<name>.json, so cuts never overwrite each other.
 """
 import asyncio
 import json
@@ -16,7 +20,6 @@ import edge_tts
 import imageio_ffmpeg
 
 HERE = Path(__file__).parent
-OUT = HERE / "out" / "voice"
 FFMPEG = imageio_ffmpeg.get_ffmpeg_exe()
 
 
@@ -28,10 +31,15 @@ def duration(path: Path) -> float:
     return int(h) * 3600 + int(mnt) * 60 + float(s)
 
 
-async def main(only):
-    spec = json.loads((HERE / "scenes.json").read_text(encoding="utf-8"))
+def paths(spec):
+    tag = f"-{spec['name']}" if spec.get("name") else ""
+    return HERE / "out" / f"voice{tag}", HERE / "out" / f"timing{tag}.json"
+
+
+async def main(spec_file, only):
+    spec = json.loads((HERE / spec_file).read_text(encoding="utf-8"))
+    OUT, timing_path = paths(spec)
     OUT.mkdir(parents=True, exist_ok=True)
-    timing_path = HERE / "out" / "timing.json"
     timing = json.loads(timing_path.read_text()) if timing_path.exists() else {}
     for scene in spec["scenes"]:
         if only and scene["id"] not in only:
@@ -44,4 +52,8 @@ async def main(only):
     print(f"total {sum(timing.values()):.1f} s")
 
 
-asyncio.run(main(set(sys.argv[1:])))
+args = sys.argv[1:]
+spec_file = "scenes.json"
+if args[:1] == ["--spec"]:
+    spec_file, args = args[1], args[2:]
+asyncio.run(main(spec_file, set(args)))
