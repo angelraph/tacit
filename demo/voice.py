@@ -7,7 +7,9 @@ scene exactly as long as its narration.
     python voice.py --spec scenes-2min.json   # a shorter cut, kept apart
 
 A spec with a "name" keeps its clips in out/voice-<name> and its lengths in
-out/timing-<name>.json, so cuts never overwrite each other.
+out/timing-<name>.json, so cuts never overwrite each other. Next to each clip,
+<scene>.words.json holds when every word is spoken, which build.py turns into
+captions.
 """
 import asyncio
 import json
@@ -45,7 +47,17 @@ async def main(spec_file, only):
         if only and scene["id"] not in only:
             continue
         mp3 = OUT / f"{scene['id']}.mp3"
-        await edge_tts.Communicate(scene["say"], spec["voice"], rate=spec.get("rate", "+0%")).save(str(mp3))
+        tts = edge_tts.Communicate(scene["say"], spec["voice"], rate=spec.get("rate", "+0%"), boundary="WordBoundary")
+        audio, words = bytearray(), []
+        async for chunk in tts.stream():
+            if chunk["type"] == "audio":
+                audio += chunk["data"]
+            elif chunk["type"] == "WordBoundary":
+                # Offsets come in 100 ns ticks.
+                start = chunk["offset"] / 1e7
+                words.append([round(start, 3), round(start + chunk["duration"] / 1e7, 3), chunk["text"]])
+        mp3.write_bytes(audio)
+        (OUT / f"{scene['id']}.words.json").write_text(json.dumps(words), encoding="utf-8")
         timing[scene["id"]] = round(duration(mp3), 2)
         print(f"{scene['id']:>8}  {timing[scene['id']]:6.2f} s")
     timing_path.write_text(json.dumps(timing, indent=2))
