@@ -2,7 +2,7 @@
 
 **Sealed-bid auctions and shielded escrow on Zcash. The price is public. The participants are not.**
 
-**Live app: [tacit-production-6a96.up.railway.app](https://tacit-production-6a96.up.railway.app)** · [Demo video](#demo) · [Proof page](https://tacit-production-6a96.up.railway.app/#/proof) · [Protocol](docs/PROTOCOL.md) · [Threat model](docs/THREAT_MODEL.md) · [Release v0.9.0](https://github.com/angelraph/tacit/releases/tag/v0.9.0)
+**Live: [Mainnet](https://tacit-mainnet.up.railway.app) · [Testnet](https://tacit-production-6a96.up.railway.app)** · [Demo video](#demo) · [Mainnet proof](https://tacit-mainnet.up.railway.app/#/proof) · [Protocol](docs/PROTOCOL.md) · [Threat model](docs/THREAT_MODEL.md) · [Release v0.9.0](https://github.com/angelraph/tacit/releases/tag/v0.9.0)
 
 <a id="demo"></a>
 [![Watch the Tacit walk through](media/demo-thumbnail.png)](https://tacit-production-6a96.up.railway.app)
@@ -63,6 +63,8 @@ The first Tacit auction with real ZEC: two sealed bids, settled by the agents, a
 | Settled at block | 3,530,603 |
 | Clearing price (second price) | 0.001 ZEC |
 | Audit verdict | Settled honestly |
+
+The public mainnet site, [tacit-mainnet.up.railway.app](https://tacit-mainnet.up.railway.app), audits this auction again on its own [Proof page](https://tacit-mainnet.up.railway.app/#/proof), from the published terms and the chain alone, and runs its own operator and arbiter for new mainnet lots.
 
 On testnet, every auction is audited live on the [Proof page](https://tacit-production-6a96.up.railway.app/#/proof). Recent settlements: `179c77a2…a78`, `6f09b98a…613`, `65810dcd…1ff`, `3e1b0e39…cdc`, all settled honestly.
 
