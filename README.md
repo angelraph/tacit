@@ -341,6 +341,7 @@ vendor/zcash_protocol/ zcash_protocol with the NU7 activation heights
 | [test-vectors/](test-vectors/) | Real settled auctions frozen from mainnet and testnet; `cargo test -p tacit-core --test conformance` replays them |
 | [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md) | What is private, what isn't, and what each party could do |
 | [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md) | The walk through, scene by scene |
+| [docs/DEMO_TRANSCRIPT.md](docs/DEMO_TRANSCRIPT.md) | The 2-minute demo's narration with timestamps; captions in [media/tacit-demo-2min.srt](media/tacit-demo-2min.srt) |
 | [demo/](demo/) | How the demo video is recorded and assembled |
 
 ## Risks
