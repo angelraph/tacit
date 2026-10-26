@@ -125,6 +125,8 @@ function scene(id) {
     },
     // Hold until the narration is done (time inside cuts doesn't count).
     async finish(extra = 0.8) {
+      // Always let the last action land on camera.
+      await sleep(2500);
       const need = (timing[id] || 8) + extra;
       while (s.t() - cutTotal < need) await sleep(100);
       const video = page.video();
@@ -277,11 +279,15 @@ const SCENES = {
     const s = scene("ways");
     await openApp(s, `/auction/${state.lot}`);
     await s.title("Bid from any wallet", "Tacit wallet, Noir extension, or a QR code");
-    await s.click('#bid-panel .tabs button[data-t="plugin"]', { after: 1400 });
-    await s.click('#bid-panel .tabs button[data-t="ext"]', { after: 800 });
-    await s.type("#refund", state.address, 4);
-    await s.click("#ext-go", { after: 300 });
+    await s.click('#bid-panel .tabs button[data-t="plugin"]', { after: 1000 });
+    await s.click('#bid-panel .tabs button[data-t="ext"]', { after: 500 });
+    await s.page.locator("#refund").fill(state.address);
+    await s.click("#ext-go", { after: 200 });
+    s.cut();
     await s.page.locator("#ext-out .qr").waitFor({ timeout: 60000 });
+    await s.page.locator("#ext-out .qr").scrollIntoViewIfNeeded();
+    await s.page.waitForTimeout(400);
+    s.uncut();
     await s.untitle();
     await s.ring("#ext-out .qr", 3000);
     await s.finish();

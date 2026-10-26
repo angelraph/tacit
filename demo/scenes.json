@@ -39,8 +39,8 @@
       "id": "sell",
       "kind": "app",
       "title": "List something",
-      "sub": "A fresh 2 of 3 vault per auction",
-      "say": "A seller lists an item: a reserve, a bond, a bidding window and the price rule. Your browser, an operator and an arbiter generate a fresh vault together. Each holds one key share, run by different people, so no single party can move the money."
+      "sub": "Tacit shows who holds the keys",
+      "say": "A seller lists an item: a reserve, a bond, a bidding window and the price rule. Your browser, an operator and an arbiter then generate a fresh vault, each holding one key share. And Tacit tells you exactly who could move the money. If two shares sit with one party, it says so, and anyone can run an independent arbiter."
     },
     {
       "id": "bid",
