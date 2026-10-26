@@ -1,69 +1,260 @@
 # Tacit
 
-Sealed-bid auctions and shielded escrow on Zcash. The price is public; the participants aren't.
+**Sealed-bid auctions and shielded escrow on Zcash. The price is public. The participants are not.**
 
-Online sealed-bid auctions have always needed an auctioneer who can read every bid, and online escrow has always needed a custodian who holds the money. Tacit replaces both with things anyone can check: drand timelock encryption, a 2-of-3 FROST vault on Zcash's Ironwood shielded pool, and a published viewing key.
+**Live app: [tacit-production-6a96.up.railway.app](https://tacit-production-6a96.up.railway.app)** · [Demo video](#demo) · [Proof page](https://tacit-production-6a96.up.railway.app/#/proof) · [Protocol](docs/PROTOCOL.md) · [Threat model](docs/THREAT_MODEL.md) · [Release v0.9.0](https://github.com/angelraph/tacit/releases/tag/v0.9.0)
 
-- **Sealed bids.** A bid is timelock-encrypted to a future drand round and rides in a shielded memo. Nobody can read a bid before that round, the seller and the operator included, and no bidder can refuse to reveal.
-- **No single custodian.** Bonds and escrow payments sit in an Ironwood address whose spending key is split 2 of 3 by distributed key generation. No one ever holds the whole key, and every cosigner recomputes the payout and refuses any other.
-- **Anyone can audit.** The vault's viewing key is part of the published terms. Any browser can rebuild the settlement the rules require and check that the vault paid exactly that, without learning who bid.
-- **Everything in the browser.** The web app is a full shielded wallet: it syncs by trial-decrypting blocks locally, seals bids, proves Ironwood transactions (about 20 s on a laptop) and runs vault seats. Keys never leave the tab.
-- **Fund from any chain.** NEAR Intents 1Click swaps USDC, ETH, SOL or BTC straight into a fresh shielded address.
+<a id="demo"></a>
+[![Watch the Tacit walk through](media/demo-thumbnail.png)](https://tacit-production-6a96.up.railway.app)
 
-See [docs/PROTOCOL.md](docs/PROTOCOL.md) for the exact rules and [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md) for what is and isn't private.
+Built for the [Zecathon](https://thezecathon.com), Private Markets track.
 
-## What you can do
+## At a glance
 
-| | |
+- **What it is:** a private market on Zcash. Sellers list, bidders seal bids, two independent agents settle, and anyone can audit the result.
+- **Sealed bids:** each bid is encrypted to a future [drand](https://drand.love) round and rides inside a shielded memo. Nobody can open it early, and nobody can refuse to reveal.
+- **No custodian:** every auction and every escrow gets a fresh 2-of-3 FROST vault on the Ironwood shielded pool. The whole key never exists anywhere.
+- **Public audit:** the vault's viewing key is published, so any browser can check the payout to the zatoshi without learning who took part.
+- **Runs in your browser:** an Ironwood light wallet compiled to WebAssembly. Keys, syncing and zero-knowledge proofs never leave the tab.
+- **Live on mainnet:** our first auction with real ZEC settled on Zcash mainnet and passed the public audit.
+- **Code:** about 9,000 lines of Rust in 7 crates, a 6,000 line web app with no build step, 37 unit tests and three end-to-end harnesses.
+
+## Contents
+
+- [The idea in one minute](#the-idea-in-one-minute)
+- [Live on Zcash mainnet](#live-on-zcash-mainnet)
+- [Why Tacit](#why-tacit)
+- [Product tour](#product-tour)
+- [How it works](#how-it-works)
+- [The life of a sealed bid](#the-life-of-a-sealed-bid)
+- [Architecture](#architecture)
+- [Privacy and security](#privacy-and-security)
+- [Design and user experience](#design-and-user-experience)
+- [Build log](#build-log)
+- [Quickstart](#quickstart)
+- [Run an agent](#run-an-agent)
+- [Repository layout](#repository-layout)
+- [Documentation](#documentation)
+- [Risks](#risks)
+- [License](#license)
+
+## The idea in one minute
+
+On a public chain every bid is visible, so auctions get sniped, bidders get front run and buyers are tracked forever. Zcash hides people, but it has no smart contracts, so fair markets have always needed a middleman who holds the money. Tacit replaces the middleman with three things anyone can check.
+
+| The problem | Tacit's answer | Built on |
+|---|---|---|
+| Bids leak before the auction ends | Bids are timelock-encrypted to a future beacon round | drand quicknet, tlock |
+| Bid sizes leak through deposit amounts | Every bidder deposits the same bond; the real bid is inside the sealed memo | ZIP 302 memos, canonical denominations |
+| Someone has to hold the money | A fresh 2-of-3 threshold vault per auction; any two cosign, each recomputes the payout first | FROST (RedPallas), PCZT |
+| Nobody can check a private settlement | The vault's viewing key is published; the audit recomputes everything from public data | Ironwood IVK and OVK |
+| Bidders are linkable | Shielded deposits, refunds to fresh diversified addresses | Ironwood shielded pool |
+
+## Live on Zcash mainnet
+
+The first Tacit auction with real ZEC: two sealed bids, settled by the agents, audited by the coordinator and by any browser.
+
+| What | Value |
 |---|---|
-| **Bid** | Pick an auction, slide to your bid, and press seal. Your browser encrypts the bid to the closing drand round and deposits the fixed bond to the vault. Every deposit looks the same on chain. |
-| **Sell** | Describe the item, set a reserve and a bond. Your browser runs key generation with an operator agent and an arbiter agent, then publishes the terms. When the bids unseal, the agents settle automatically. |
-| **Escrow** | Send the other side an invite link. Your browsers and an arbiter generate a shared vault. The buyer pays in. The buyer releases the money to the seller, or the seller refunds the buyer. The arbiter steps in only for disputes. |
-| **Audit** | On any auction, press "Run audit in this tab". It finds every deposit with the public viewing key, opens the bids with the drand beacon, recomputes the settlement and compares it with what the vault paid. |
+| Auction | `5c5a98387738e2fbd5345f53982e4fc505d4d687a0f3afde2e4c67da791d391c` |
+| Sealed bid 1 (0.002 ZEC bond) | `967ec7938963c93c35bbc4813c76fc63ea0db6a287f8ee99326eee763648ed32` |
+| Sealed bid 2 (0.002 ZEC bond) | `f572a5d07137c72211eafaa348d4d4a922cc2f1c8cd925c21ba6f434077afadf` |
+| Settlement (one shielded payout) | `8d9f0e7040eda2052a8cde555e4c2595ae8decff9c17be47f080da7525bef49c` |
+| Settled at block | 3,530,603 |
+| Clearing price (second price) | 0.001 ZEC |
+| Audit verdict | Settled honestly |
 
-## How it fits together
+On testnet, every auction is audited live on the [Proof page](https://tacit-production-6a96.up.railway.app/#/proof). Recent settlements: `179c77a2…a78`, `6f09b98a…613`, `65810dcd…1ff`, `3e1b0e39…cdc`, all settled honestly.
 
-```text
- browser (web/)                          coordinator (tacit-coordinator)
- ┌──────────────────────────────┐        ┌──────────────────────────────┐
- │ tacit-wasm in a Web Worker   │  JSON  │ auction + escrow registry    │
- │  · wallet: scan, witnesses   │◄──────►│ sealed seat mailboxes        │
- │  · seal bid, prove, sign     │        │ chain gateway (public data)  │──► Zebra (lightwalletd gRPC)
- │  · FROST seat (DKG, signing) │        └──────────────────────────────┘
- │  · audit from terms          │                     ▲
- └──────────────────────────────┘                     │ sealed envelopes
-                                         ┌────────────┴─────────────────┐
-              drand quicknet ◄────────── │ tacit agent (operator/arbiter)│
-                                         └──────────────────────────────┘
+## Why Tacit
+
+**What's new.** Trust-minimized auctions and escrow on a chain with no smart contracts. Threshold signing replaces the contract, timelock encryption replaces the trusted auctioneer, and a published viewing key replaces "trust us".
+
+**Privacy that holds up.** Before the round, nobody learns anything about bids. After it, everyone sees the bids and the price but not who placed them. Deposits are identical in size, refunds go to fresh addresses, and every Tacit transaction is Ironwood-only. The [threat model](docs/THREAT_MODEL.md) spells out what is and isn't private.
+
+**Security by recomputation.** An agent never signs what it is told to sign. It recomputes the settlement from the published terms, the chain and the beacon, checks the transaction pays exactly that, and refuses anything else. The worst a dishonest co-signer can get is a refusal.
+
+**Independent by design.** Agents are open: anyone can run one with two commands. Every agent says who runs it, and the Sell page tells you plainly whether any single party would hold two of a vault's three shares.
+
+**Ready for NU7.** Tacit builds against the NU7 consensus rules that went live on testnet in October, runs its own testnet faucet while the public ones wait for wallet updates, and tracks the mainnet activation at block 3,543,405.
+
+**Usable by anyone.** Bid from the Tacit wallet, from the Noir browser extension in one click, or from any mobile wallet by scanning a ZIP 321 payment request. Fund from BTC, ETH, SOL or USDC through NEAR Intents. Install it as an app.
+
+## Product tour
+
+**Landing.** Live prices, chain status, the agents online.
+
+[![Landing](media/landing.png)](media/landing.png)
+
+**Wallet.** A shielded Ironwood wallet in the tab: 12 or 24 words, a QR code, the testnet faucet one tap away.
+
+[![Wallet](media/wallet.png)](media/wallet.png)
+
+**Sell.** Item, reserve, bond, window and rule. Your browser and two agents generate the vault; the page shows who holds each key share.
+
+[![Sell](media/sell.png)](media/sell.png)
+
+**Bid.** The bid is sealed to a drand round and the deposit is proved while you read the confirmation, so sending is instant.
+
+[![Bid](media/bid.png)](media/bid.png)
+
+**Any wallet.** A ZIP 321 payment request with the sealed bid in its memo, for Zashi, Zingo, YWallet and friends.
+
+[![Any wallet](media/ways.png)](media/ways.png)
+
+**Unseal, settle, audit.** One click recomputes everything and checks the vault paid exactly what the rules require.
+
+[![Audit](media/settle.png)](media/settle.png)
+
+**Proof.** Every auction, audited in public. This is mainnet.
+
+[![Proof](media/proof.png)](media/proof.png)
+
+**Escrow.** Pay a stranger without trusting them: buyer, seller and an arbiter each hold one share.
+
+[![Escrow](media/escrow.png)](media/escrow.png)
+
+**Agents.** The seats that never sleep, and how to become one.
+
+[![Agents](media/agents.png)](media/agents.png)
+
+## How it works
+
+```mermaid
+flowchart LR
+    S[Seller's browser] -->|FROST key generation| V[(2-of-3 vault<br/>Ironwood address)]
+    O[Operator agent] -->|key share| V
+    A[Arbiter agent] -->|key share| V
+    S -->|publish terms + audit key| R[Coordinator registry]
+    B[Bidder's browser] -->|seal bid to drand round N| M[Shielded memo]
+    M -->|deposit the bond| V
+    D[drand quicknet] -->|beacon for round N| O
+    D --> A
+    O -->|recompute and propose payout| P[One shielded settlement]
+    A -->|recompute, check, cosign| P
+    V --> P
+    P -->|price| S
+    P -->|refunds to fresh addresses| B
+    X[Anyone] -->|audit key + chain + beacon| C{Settled honestly?}
 ```
 
-The coordinator never holds a key, never sees a readable seat message, and only relays public chain data and finished, encrypted transactions. The worst it can do is drop messages.
+1. **List.** The seller's browser runs FROST distributed key generation with an operator agent and an arbiter agent through sealed envelopes on the coordinator. The terms (item, reserve, bond, bidding height, drand round, price rule, vault viewing key) are hashed into the auction id, so changing any term makes a different auction.
+2. **Bid.** The bidder's browser encrypts `{bid, refund address}` to the closing drand round, puts it in a 512 byte memo, and pays exactly the bond into the vault. All deposits look identical.
+3. **Unseal.** When drand publishes the round, anyone can open every bid. A bid can't be withheld, because the beacon opens it whether the bidder likes it or not.
+4. **Settle.** The operator computes the payout the rules require (first or second price, ties broken deterministically), builds one shielded transaction, and asks the arbiter to cosign. The arbiter recomputes it independently and signs only if it matches.
+5. **Audit.** Anyone can rebuild the same result from the terms, the chain and the beacon, and compare it with what the vault paid, using the vault's outgoing viewing key.
 
-## Status
+## The life of a sealed bid
 
-Working end to end on a Zebra regtest chain with Zcash NU6.3 (Ironwood) active:
+```mermaid
+sequenceDiagram
+    participant B as Bidder's browser
+    participant C as Coordinator
+    participant Z as Zcash (Ironwood)
+    participant D as drand
+    participant O as Operator
+    participant A as Arbiter
+    B->>C: read terms and vault address
+    B->>B: seal {bid, refund address} to round N
+    B->>B: prove the bond deposit (WebAssembly, in the tab)
+    B->>Z: shielded deposit with the sealed memo
+    Note over Z: every deposit is the same size
+    D-->>O: beacon for round N
+    O->>Z: scan the vault, open every bid
+    O->>O: compute the payout the rules require
+    O->>C: signing room (sealed envelopes)
+    A->>A: recompute independently and compare
+    A->>C: FROST signature share
+    O->>Z: one settlement: price to the seller, refunds to fresh addresses
+    B->>Z: audit with the public viewing key
+```
 
-- 2 of 3 FROST key generation and spend authorization across separate processes and browsers, only talking through the coordinator in sealed envelopes
-- sealed-bid auctions: bids, unsealing, second-price settlement by agents, and an outside audit
-- shielded escrow: release, refund, and arbiter decisions
-- the browser wallet's code paths, checked natively against the chain gateway (`tacit-dev light-e2e`)
+## Architecture
 
-## Layout
+```mermaid
+flowchart TB
+    subgraph Browser
+      UI[Web app<br/>plain ES modules]
+      W[Wallet worker<br/>tacit-wasm]
+      P[Prover worker<br/>threaded tacit-wasm]
+      UI --> W
+      UI --> P
+    end
+    subgraph Coordinator
+      REG[Auction and escrow registry]
+      MB[Sealed seat mailboxes]
+      GW[Chain gateway<br/>+ block cache]
+      PR[Proof auditor]
+      FA[Faucet relay]
+    end
+    AG[tacit agents<br/>operator and arbiter]
+    LWD[lightwalletd]
+    DR[drand quicknet]
+    NI[NEAR Intents 1Click]
+    W <--> GW
+    P <--> GW
+    UI <--> REG
+    UI <--> MB
+    AG <--> MB
+    AG <--> LWD
+    GW <--> LWD
+    PR --> GW
+    UI --> DR
+    AG --> DR
+    UI --> NI
+```
 
-| Path | What it does |
+| Component | What it does |
 |---|---|
-| `crates/tacit-core` | auction and escrow rules, sealed-bid memos, drand beacon verification, seat envelopes |
-| `crates/tacit-vault` | FROST vaults; key generation and signing as message-passing state machines |
-| `crates/tacit-light` | the browser wallet: compact block scanning, witnesses, building and proving payments, audits |
-| `crates/tacit-wasm` | `tacit-light` and vault seats compiled to WebAssembly for the web app |
-| `crates/tacit-wallet` | the native wallet on librustzcash, auction helpers, coordinator client, `tacit-dev` |
-| `crates/tacit-coordinator` | registry, seat mailboxes and the chain gateway (axum and SQLite) |
-| `crates/tacit-cli` | the `tacit` command, including `tacit agent` and `tacit decide` |
-| `web/` | the web app (plain ES modules, no build step besides the WebAssembly) |
+| Web app (`web/`) | The whole product in the browser. No framework and no build step besides the WebAssembly. Installable as an app. |
+| Wallet worker | Syncs by trial-decrypting compact blocks, keeps witnesses only for unspent notes, seals bids, runs vault seats, audits. |
+| Prover worker | The same code built with threads: proves Ironwood transactions and decrypts long restores on every core. |
+| Coordinator | Registry, sealed mailboxes, a JSON chain gateway with a block cache warmed from Ironwood's activation, the proof auditor, and the faucet relay. It never holds a key or sees a readable seat message. |
+| Agents | `tacit agent`: always-online vault seats. They join key generation, settle auctions when they unseal, and cosign only what they recompute. |
+| CLI | `tacit`: wallet, vaults, auctions, audits, agents and the testnet faucet from the terminal. |
 
-## Run it locally on regtest
+## Privacy and security
 
-You need Rust, Python 3 and a Zebra 6.4+ node in regtest mode (`tacit-dev init` writes its config). Building the WebAssembly needs clang and wasm-bindgen-cli 0.2.129 (on Windows, run `web/build.sh` in WSL).
+| Property | How | Checked by |
+|---|---|---|
+| Bids unreadable before the close | tlock encryption to a drand round that doesn't exist yet | drand's threshold network; beacon verified in the browser and by agents |
+| Deposits reveal no bid sizes | Identical bonds, real bid inside the memo | Audit shows every deposit equals the bond |
+| No single party can move funds | FROST 2-of-3; the full key is never assembled | Key generation and signing only through sealed envelopes |
+| Payouts follow the rules | Each cosigner recomputes the settlement before signing | Arbiter refuses mismatches; public audit compares with the outgoing viewing key |
+| Bidders unlinkable | Ironwood-only transactions, refunds to fresh diversified addresses | Threat model; transactions carry only an Ironwood bundle |
+| Coordinator learns nothing private | It relays public chain data and encrypted envelopes; syncing is trial decryption in the browser | Code review; the coordinator has no keys |
+| Wallet keys stay local | Phrase and shares encrypted with AES-GCM under a PBKDF2 key from your passcode | Browser storage only |
+
+What isn't private, and what an agent operator could still do, is written out in the [threat model](docs/THREAT_MODEL.md).
+
+## Design and user experience
+
+- One page per job: Market, Sell, Escrow, Wallet, Faucet, Proof, Agents, FAQ. Mobile-first and installable as an app.
+- Zero-knowledge proofs start the moment you press "Seal and deposit", so confirming sends instantly.
+- One bid at a time; repeated clicks can't clear a proof in flight; plain messages when change is still confirming.
+- Restoring an older wallet uses a server-side block cache and decrypts on every core.
+- Every auction page audits itself once the bids unseal, and remembers the verdict.
+- Live prices, a market table, countdowns tied to block height and drand time, and a timeline from bidding to settled.
+
+## Build log
+
+| Date | Milestone |
+|---|---|
+| Sep 29 | Sealed bids, drand beacon verification, and a 2-of-3 FROST vault spend on a live Zebra chain |
+| Sep 30 | Sealed-bid auctions working end to end on regtest |
+| Oct 4 | Browser proving benchmark: Ironwood proofs in about 20 seconds in a tab |
+| Oct 5 | Coordinator, sealed seat envelopes, distributed key generation and signing; the `tacit` CLI |
+| Oct 24 | Browser wallet, agents, escrow and the web app; one-container deployment |
+| Oct 25 | NU7, testnet faucet, Noir and ZIP 321 bidding, installable app; first full testnet auction settled and audited |
+| Oct 25 | First mainnet auction with real ZEC settled and audited |
+| Oct 25 | Block cache, multi-core restores, Proof page, independent agent identities |
+| Oct 26 | No-bids verdict, resilient connections, release v0.9.0 |
+
+## Quickstart
+
+Use it: open the [live app](https://tacit-production-6a96.up.railway.app), create a wallet, press **Get free TAZ** on the Faucet page, and bid on an open auction.
+
+Run it locally on a Zebra regtest chain. You need Rust, Python 3 and Zebra 6.4+ (`tacit-dev init` writes its config). Building the WebAssembly needs clang and wasm-bindgen-cli 0.2.129; on Windows, run `web/build.sh` in WSL.
 
 ```bash
 # chain, block clock and coordinator with its chain gateway
@@ -72,9 +263,9 @@ cargo run -p tacit-coordinator -- 127.0.0.1:8650 coordinator.sqlite http://127.0
 
 # an operator and an arbiter agent, each with its own home
 cargo run -p tacit-cli -- --home ./operator init
-cargo run -p tacit-cli -- --home ./operator agent --role operator --name "Tacit operator"
+cargo run -p tacit-cli -- --home ./operator agent --role operator --name "Operator" --run-by "You"
 cargo run -p tacit-cli -- --home ./arbiter init
-cargo run -p tacit-cli -- --home ./arbiter agent --role arbiter --name "Tacit arbiter"
+cargo run -p tacit-cli -- --home ./arbiter agent --role arbiter --name "Arbiter" --run-by "A friend"
 
 # the web app
 sh web/build.sh
@@ -83,12 +274,64 @@ python web/serve.py 8770        # then open http://127.0.0.1:8770
 
 Fund a browser wallet with `cargo run -p tacit-wallet --bin tacit-dev -- fund <address> <zatoshi>`.
 
-The end-to-end checks:
+End-to-end checks:
 
 ```bash
-cargo run -p tacit-wallet --bin tacit-dev -- auction-e2e
-cargo run -p tacit-wallet --bin tacit-dev -- light-e2e
+cargo run -p tacit-wallet --bin tacit-dev -- auction-e2e      # a full sealed-bid auction, natively
+cargo run -p tacit-wallet --bin tacit-dev -- light-e2e        # the browser wallet's code paths
+cargo run -p tacit-wallet --bin tacit-dev -- scan-check <gateway> <auction id>   # audit a live auction
 ```
+
+## Run an agent
+
+Anyone can be an arbiter. It needs no funds: it only holds key shares and cosigns what the rules allow.
+
+```bash
+curl -L -o tacit https://github.com/angelraph/tacit/releases/latest/download/tacit-linux-x86_64
+chmod +x tacit
+./tacit --network test init --server https://testnet.zec.rocks:443 \
+  --coordinator https://tacit-production-6a96.up.railway.app
+./tacit --network test agent --role arbiter --name "My arbiter" --run-by "Your name"
+```
+
+It shows up on the [Agents page](https://tacit-production-6a96.up.railway.app/#/agents) within a minute, and sellers can pick it.
+
+## Repository layout
+
+```text
+crates/
+  tacit-core/          auction and escrow rules, sealed-bid memos, drand beacon, seat envelopes
+  tacit-vault/         FROST vaults: key generation and signing as message-passing state machines
+  tacit-light/         the browser wallet: compact block scanning, witnesses, payments, audits
+  tacit-wasm/          tacit-light and vault seats compiled to WebAssembly
+  tacit-wallet/        the native wallet on librustzcash, coordinator client, tacit-dev harnesses
+  tacit-coordinator/   registry, mailboxes, chain gateway with block cache, proof auditor
+  tacit-cli/           the tacit command: wallet, vaults, auctions, agents, faucet
+web/                   the web app (ES modules, WebAssembly workers, PWA)
+deploy/                one-container deployment: coordinator, agents and faucet
+demo/                  the scripted demo video: scenes, motion graphics, voice-over, assembly
+docs/                  protocol, threat model, demo script
+media/                 screenshots
+vendor/zcash_protocol/ zcash_protocol with the NU7 activation heights
+```
+
+## Documentation
+
+| Document | What's in it |
+|---|---|
+| [docs/PROTOCOL.md](docs/PROTOCOL.md) | The exact rules: terms, memo format, settlement, escrow |
+| [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md) | What is private, what isn't, and what each party could do |
+| [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md) | The walk through, scene by scene |
+| [demo/](demo/) | How the demo video is recorded and assembled |
+
+## Risks
+
+- New code that holds money. Start with amounts you can afford to lose.
+- An operator and an arbiter run by the same party could move a vault together. Tacit shows who runs each agent and warns when that would happen; pick independent agents, or run one.
+- drand's threshold network is trusted not to publish a round early.
+- The coordinator can see when you connect and can delay or drop messages. It can't read seat messages or move funds.
+- Funding from another chain through NEAR Intents is public on that chain.
+- Mainnet NU7 activates at block 3,543,405; Tacit builds against those rules.
 
 ## License
 
