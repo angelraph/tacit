@@ -72,7 +72,7 @@ export async function renderProof(ctx) {
   const { api, esc, zec, unit, short, ago, S, netName } = ctx;
   const view = document.getElementById("view");
   view.innerHTML = `
-    <div class="page-head reveal"><span class="eyebrow">Proof</span><h1>Every market, <span class="dim">audited in public</span></h1><p>Each auction below is audited from its published terms, public chain data and the drand beacon, by the same code that runs when you press "Run audit in this tab". Don't take this page's word for it: open any auction and audit it yourself.</p></div>
+    <div class="page-head reveal"><span class="eyebrow">Proof</span><h1>Every market, <span class="dim">audited in public</span></h1><p>Each auction below is audited from its published terms, public chain data and the drand beacon, by the same code that runs when you press "Run audit in this tab". Don't take this page's word for it: open any auction and audit it yourself, or replay settled ones offline with the <a href="https://github.com/angelraph/tacit/tree/main/test-vectors" target="_blank" rel="noopener">conformance vectors</a>.</p></div>
     <div id="proof-body"><div class="progress spin" style="margin:30px 0"><i></i></div></div>`;
   reveals(view);
   let p;

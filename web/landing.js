@@ -111,8 +111,9 @@ export async function renderLanding(ctx) {
         </h1>
         <p class="hero-sub reveal" style="--d:.15s">Tacit runs sealed-bid auctions and escrow on Zcash's shielded pool. Bids stay locked until a public beacon opens them for everyone at once, and anyone can audit the result without learning who took part.</p>
         <div class="hero-cta reveal" style="--d:.3s">
-          <a class="btn primary" href="#/market">Launch app <span class="arrow">↗</span></a>
-          <a class="btn glass" href="#story">See how it works</a>
+          <a class="btn primary" href="#/try">Try it in 3 minutes <span class="arrow">↗</span></a>
+          <a class="btn glass" href="#/market">Launch app</a>
+          <a class="btn glass" href="#/proof">See the proof</a>
         </div>
       </div>
       <div class="price-card left" id="pc-zec">
