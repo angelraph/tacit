@@ -574,7 +574,7 @@ async function renderAuction(m, token) {
     const p = phase(terms, S.info && S.info.tip);
     const settled = S.settled && S.settled[id];
     view.querySelector("#phase-badge").outerHTML = settled
-      ? `<span id="phase-badge" class="badge settled">Settled</span>`
+      ? `<span id="phase-badge" class="badge settled">${typeof settled === "string" ? esc(settled) : "Settled"}</span>`
       : `<span id="phase-badge" class="badge ${p.key}">${p.label}</span>`;
     const left = Math.max(0, terms.bids_until_height - (S.info ? S.info.tip : 0));
     view.querySelector("#bs-left").textContent = left ? `${left} blocks left` : "bidding closed";
@@ -881,11 +881,12 @@ async function runAudit(terms, id) {
     const t0 = performance.now();
     const r = await call("audit", { terms, beacon: b }, onProgress);
     const secs = ((performance.now() - t0) / 1000).toFixed(1);
-    if (r.verdict === "honest") {
-      S.settled[id] = true;
+    if (r.verdict === "honest" || r.verdict === "no_bids") {
+      const label = r.verdict === "honest" ? "Settled" : "Closed, no bids";
+      S.settled[id] = label;
       safeSet("tacit.settled", JSON.stringify(S.settled));
       const badge = view.querySelector("#phase-badge");
-      if (badge) badge.outerHTML = `<span id="phase-badge" class="badge settled">Settled</span>`;
+      if (badge) badge.outerHTML = `<span id="phase-badge" class="badge settled">${label}</span>`;
       const steps = [...view.querySelectorAll("#timeline .step")];
       steps.forEach((s, i) => (s.className = `step ${i < steps.length - 1 ? "done" : "now"}`));
     }
@@ -902,6 +903,7 @@ function auditHtml(r, terms, b, secs) {
     open: ["sealed", "Bids still sealed", `Found ${r.deposits.length} deposit${r.deposits.length === 1 ? "" : "s"}. Every bid stays sealed until drand round ${terms.close_round}.`],
     awaiting_settlement: ["open", "Unsealed, not settled yet", "The bids are open and the result is fixed. The vault hasn't paid out yet."],
     honest: ["honest", "Settled honestly", "The vault paid exactly what the rules require, no more and no less."],
+    no_bids: ["honest", "Closed with no bids", "The bids unsealed and there were none. The vault never moved."],
     mismatch: ["bad", "Settlement doesn't match", "The vault's payments differ from what the rules require. See below."],
   };
   const [cls, title, text] = verdicts[r.verdict];
@@ -1388,7 +1390,7 @@ megaTrigger.onmouseenter = () => setMega(true);
 mega.onmouseenter = () => clearTimeout(megaTimer);
 addEventListener("keydown", (e) => e.key === "Escape" && setMega(false));
 document.getElementById("menu-btn").onclick = () => document.body.classList.toggle("menu-open");
-mountTicker(document.getElementById("ticker"), ["TACIT · SEALED MARKETS ON ZCASH", "TESTNET LIVE", "SHIELDS UP"]);
+mountTicker(document.getElementById("ticker"), ["TACIT · SEALED MARKETS ON ZCASH", "LIVE ON MAINNET AND TESTNET", "SHIELDS UP"]);
 document.querySelectorAll(".wordmark").forEach((w) => w.parentElement.addEventListener("mouseenter", () => scramble(w, { duration: 500 })));
 
 // In-page anchors ("#story") scroll instead of routing.

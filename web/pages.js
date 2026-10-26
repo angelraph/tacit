@@ -86,6 +86,7 @@ export async function renderProof(ctx) {
   const badge = (v) =>
     ({
       honest: '<span class="badge settled">settled honestly</span>',
+      no_bids: '<span class="badge settled">closed, no bids</span>',
       mismatch: '<span class="badge bad">mismatch</span>',
       awaiting_settlement: '<span class="badge open">unsealed</span>',
       open: '<span class="badge sealed">bidding / sealed</span>',
