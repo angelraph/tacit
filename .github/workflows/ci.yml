@@ -35,9 +35,11 @@ jobs:
       - name: Build the single-threaded wallet the web app loads
         env:
           CC_wasm32_unknown_unknown: clang
-          AR_wasm32_unknown_unknown: llvm-ar
           RUSTFLAGS: --cfg getrandom_backend="wasm_js" --cfg zcash_unstable="nu7"
-        run: cargo build --release -p tacit-wasm --target wasm32-unknown-unknown --locked
+        run: |
+          # The runner ships LLVM's archiver under a versioned name.
+          export AR_wasm32_unknown_unknown="$(command -v llvm-ar || ls /usr/bin/llvm-ar-* | sort -V | tail -1)"
+          cargo build --release -p tacit-wasm --target wasm32-unknown-unknown --locked
 
   release:
     name: Linux release binaries
