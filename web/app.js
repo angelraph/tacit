@@ -116,10 +116,26 @@ function normaliseNet(chain) {
 export const netName = (n) => ({ main: "Mainnet", test: "Testnet", regtest: "Regtest" })[n] || n;
 export const unit = () => (S.net === "main" ? "ZEC" : "TAZ");
 
+/** Links to the public site for each network; the current one is marked. */
+function networkSwitch() {
+  const sites = window.TACIT_SITES || {};
+  const here = location.origin;
+  const links = ["main", "test"]
+    .filter((n) => sites[n])
+    .map((n) => {
+      const on = sites[n] === here || (S.net === n && !Object.values(sites).includes(here));
+      return on
+        ? `<span class="chip on" aria-current="page">${netName(n)}</span>`
+        : `<a class="chip" href="${sites[n]}/${location.hash}">${netName(n)}</a>`;
+    });
+  return links.length ? `<div class="chips net-switch" style="margin:14px 0 4px">${links.join("")}</div>` : "";
+}
+
 document.getElementById("chain").onclick = () => {
   const m = modal(`
     <h2>Chain gateway</h2>
     <p class="muted">Tacit syncs and broadcasts through a coordinator's chain gateway. It only ever sees public chain data and finished, encrypted transactions.</p>
+    ${networkSwitch()}
     <label class="field"><span>Coordinator URL</span><input id="gw" value="${esc(gatewayUrl())}" /></label>
     ${S.info ? `<p class="faint" style="margin-top:12px">Connected: ${esc(S.info.node)}, ${esc(netName(S.net))}, tip ${S.info.tip}</p>` : ""}
     <div class="row" style="margin-top:16px"><span class="spacer"></span><button class="btn ghost" data-close>Cancel</button><button class="btn primary" id="save">Save</button></div>`);

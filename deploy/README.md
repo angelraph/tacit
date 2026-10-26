@@ -21,3 +21,7 @@ vault key shares, which must survive restarts.
 | `TACIT_LIGHTWALLETD` | `https://testnet.zec.rocks:443` |
 | `TACIT_NETWORK` | `test` |
 | `DATA_DIR` | `/data` |
+
+The public mainnet site (https://tacit-mainnet.up.railway.app) is the same
+image with `TACIT_NETWORK=main` and `TACIT_LIGHTWALLETD=https://zec.rocks:443`,
+on its own volume. Mainnet has no faucet.

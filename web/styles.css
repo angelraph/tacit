@@ -2077,3 +2077,8 @@ pre.cmd {
     filter: none;
   }
 }
+.net-switch .chip {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
