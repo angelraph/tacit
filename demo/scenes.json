@@ -1,0 +1,94 @@
+{
+  "voice": "en-US-AndrewMultilingualNeural",
+  "rate": "-2%",
+  "scenes": [
+    {
+      "id": "intro",
+      "kind": "page",
+      "page": "intro.html",
+      "say": "This is Tacit. Sealed bid auctions and shielded escrow on Zcash. The price is public. The participants are not."
+    },
+    {
+      "id": "problem",
+      "kind": "page",
+      "page": "problem.html",
+      "say": "Every auction on a public blockchain leaks. Bids are visible, so people snipe them. Bidders are visible, so whales get front run and buyers get tracked. And Zcash has no smart contracts, so fair markets have always needed a middleman you had to trust. Tacit removes both problems."
+    },
+    {
+      "id": "landing",
+      "kind": "app",
+      "title": "Tacit",
+      "sub": "Live on Zcash mainnet and testnet",
+      "say": "Tacit runs entirely in your browser. Live prices up top, the market a click away. Under the hood: drand timelock encryption, two of three FROST vaults on Zcash's Ironwood pool, and an audit key anyone can use."
+    },
+    {
+      "id": "wallet",
+      "kind": "app",
+      "title": "A wallet in seconds",
+      "sub": "Keys and proofs never leave the tab",
+      "say": "First, a wallet. Pick a twelve or twenty four word phrase, write it down, choose a passcode. That's it. It syncs by decrypting blocks locally, so the server never learns which coins are yours."
+    },
+    {
+      "id": "faucet",
+      "kind": "app",
+      "title": "Free testnet coins",
+      "sub": "Works on NU7 today",
+      "say": "On testnet, one tap gets you coins from Tacit's own faucet, shielded straight to your address. It already works on the NU7 upgrade, while the public faucets wait for wallet updates."
+    },
+    {
+      "id": "sell",
+      "kind": "app",
+      "title": "List something",
+      "sub": "A fresh 2 of 3 vault per auction",
+      "say": "A seller lists an item: a reserve, a bond, a bidding window and the price rule. Your browser, an operator and an arbiter generate a fresh vault together. Each holds one key share, run by different people, so no single party can move the money."
+    },
+    {
+      "id": "bid",
+      "kind": "app",
+      "title": "Seal a bid",
+      "sub": "Encrypted to a future drand round",
+      "say": "Now a bidder. Every bid deposits the same bond, so the chain shows nothing about how much anyone bid. The bid itself is encrypted to a future drand round. Nobody can open it early. Not the seller, not us. Tacit proves the deposit in your browser while you read the confirmation, so sending is instant."
+    },
+    {
+      "id": "ways",
+      "kind": "app",
+      "title": "Bid from any wallet",
+      "sub": "Tacit wallet, Noir extension, or a QR code",
+      "say": "You can bid from the Tacit wallet, from the Noir browser extension in one click, or from any mobile wallet by scanning a payment request. Your bid is sealed here first, in every case."
+    },
+    {
+      "id": "settle",
+      "kind": "app",
+      "title": "Unseal, settle, audit",
+      "sub": "Anyone can check the result",
+      "say": "When the round is published, every bid opens at the same moment. The agents recompute the result from the rules and cosign one shielded payout. Then anyone can audit it: your browser finds every deposit, verifies the beacon, opens the bids and checks the vault paid exactly what the rules require. Settled honestly."
+    },
+    {
+      "id": "proof",
+      "kind": "app",
+      "title": "Proof, in public",
+      "sub": "Every auction, audited",
+      "say": "The proof page audits every auction in public. And this is not just testnet. Our first auction with real ZEC has settled on mainnet, and passed the same audit."
+    },
+    {
+      "id": "escrow",
+      "kind": "app",
+      "title": "Shielded escrow",
+      "sub": "Pay a stranger without trusting them",
+      "say": "The same vaults power escrow. Buyer, seller and an arbiter each hold a share. The buyer pays in, then releases the money when the deal is done. Nobody on chain can tell it was an escrow at all."
+    },
+    {
+      "id": "agents",
+      "kind": "app",
+      "title": "Anyone can be an arbiter",
+      "sub": "Two commands, no funds needed",
+      "say": "Agents are open to everyone. Download one binary, run two commands, and you are an arbiter that sellers can pick. The more independent agents, the stronger every market gets."
+    },
+    {
+      "id": "outro",
+      "kind": "page",
+      "page": "outro.html",
+      "say": "Tacit. Sealed markets on Zcash. Open source, live today. Try it, and audit it yourself."
+    }
+  ]
+}

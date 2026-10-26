@@ -1,0 +1,33 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Tacit intro</title><link rel="stylesheet" href="base.css">
+<style>
+  .logo { width: 220px; height: 220px; animation: logoIn 1.4s .2s cubic-bezier(.2,.8,.2,1) both; filter: drop-shadow(0 0 60px rgba(109,92,255,.55)); }
+  @keyframes logoIn { from { opacity: 0; transform: scale(.6) rotate(-12deg); filter: blur(20px); } }
+  .word { font-size: 150px; line-height: 1; margin-top: 24px; }
+  .word span { display: inline-block; opacity: 0; animation: rise .7s cubic-bezier(.2,.8,.2,1) both; }
+  .tag { font-size: 46px; color: var(--muted); margin-top: 26px; }
+  .tag b { color: var(--text); font-weight: 600; }
+  .chips { display: flex; gap: 16px; justify-content: center; margin-top: 46px; }
+  .sweep { position: absolute; inset: 0; background: linear-gradient(100deg, transparent 40%, rgba(182,168,255,.08) 50%, transparent 60%);
+    animation: sweep 2.4s 1.2s ease both; }
+  @keyframes sweep { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+</style></head>
+<body>
+  <div class="aurora"></div><div class="ring r2"></div><div class="ring"></div><div class="grain"></div><div class="sweep"></div>
+  <div class="center fadeall"><div>
+    <img class="logo" src="logo.svg" alt="">
+    <div class="word display" id="word"></div>
+    <p class="tag in" style="--at:.42">Sealed markets on Zcash. <b>The price is public. The participants are not.</b></p>
+    <div class="chips">
+      <span class="chip in" style="--at:.6"><i></i>drand timelock</span>
+      <span class="chip in" style="--at:.66"><i></i>FROST 2 of 3 vaults</span>
+      <span class="chip in" style="--at:.72"><i></i>Ironwood shielded pool</span>
+      <span class="chip in" style="--at:.78"><i></i>Public audit</span>
+    </div>
+  </div></div>
+<script>
+  const T = Number(new URLSearchParams(location.search).get("d")) || 9;
+  document.documentElement.style.setProperty("--T", T);
+  document.getElementById("word").innerHTML = [..."tacit"].map((c, i) => `<span style="animation-delay:${0.9 + i * 0.09}s">${c}</span>`).join("");
+</script>
+</body></html>

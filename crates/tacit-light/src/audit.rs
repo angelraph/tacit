@@ -200,6 +200,12 @@ impl Audit {
             report.deposits = rows;
             return Err(Error::Chain("fetch every deposit transaction before settling".into()));
         }
+        // Nobody bid: there is nothing to settle, and a vault that paid
+        // anything out anyway would be a mismatch.
+        if deposits.is_empty() {
+            report.verdict = if self.scanner.spends().is_empty() { Verdict::NoBids } else { Verdict::Mismatch };
+            return Ok(report);
+        }
         let outcome = auction::settle(&self.terms, &deposits, beacon).map_err(invalid)?;
         for (row, opened) in rows.iter_mut().zip(&outcome.opened) {
             row.bid = opened.bid;
@@ -278,6 +284,8 @@ pub enum Verdict {
     AwaitingSettlement,
     /// The vault paid exactly what the rules require.
     Honest,
+    /// The bids unsealed and there were none; the vault never moved.
+    NoBids,
     /// The vault paid something else.
     Mismatch,
 }

@@ -1,0 +1,26 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Tacit</title><link rel="stylesheet" href="base.css">
+<style>
+  .logo { width: 150px; animation: logoIn 1.2s cubic-bezier(.2,.8,.2,1) both; filter: drop-shadow(0 0 50px rgba(109,92,255,.6)); }
+  @keyframes logoIn { from { opacity: 0; transform: scale(.7); filter: blur(16px); } }
+  h1 { font-size: 120px; margin-top: 18px; }
+  .tag { font-size: 42px; color: var(--muted); margin-top: 14px; }
+  .links { display: grid; gap: 16px; margin-top: 56px; justify-items: center; }
+  .link { font-size: 30px; padding: 16px 30px; border-radius: 18px; border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.04); }
+  .link b { color: var(--violet-3); font-weight: 500; margin-right: 14px; }
+  .foot { margin-top: 48px; font-size: 24px; color: var(--muted); letter-spacing: .08em; }
+</style></head>
+<body>
+  <div class="aurora"></div><div class="ring r2"></div><div class="ring"></div><div class="grain"></div>
+  <div class="center"><div>
+    <img class="logo" src="logo.svg" alt="">
+    <h1 class="display in" style="--at:.05">tacit</h1>
+    <p class="tag in" style="--at:.15">Sealed markets on Zcash.</p>
+    <div class="links">
+      <div class="link mono in" style="--at:.3"><b>Try it</b>tacit-production-6a96.up.railway.app</div>
+      <div class="link mono in" style="--at:.38"><b>Code</b>github.com/angelraph/tacit</div>
+    </div>
+    <p class="foot in" style="--at:.5">OPEN SOURCE · LIVE ON MAINNET · BUILT FOR THE ZECATHON</p>
+  </div></div>
+<script>document.documentElement.style.setProperty("--T", Number(new URLSearchParams(location.search).get("d")) || 8);</script>
+</body></html>

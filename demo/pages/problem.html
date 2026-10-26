@@ -1,0 +1,35 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>The problem</title><link rel="stylesheet" href="base.css">
+<style>
+  .wrap { position: absolute; inset: 0; padding: 120px 160px; }
+  .eyebrow { font-size: 24px; letter-spacing: .3em; text-transform: uppercase; color: var(--violet-3); }
+  h1 { font-size: 92px; line-height: 1.02; margin-top: 18px; max-width: 1400px; }
+  h1 .dim { color: #5e5b78; }
+  .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 28px; margin-top: 70px; }
+  .card { position: relative; padding: 38px 36px; border-radius: 28px; border: 1px solid rgba(255,255,255,.1);
+    background: linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.015)); overflow: hidden; }
+  .card .k { font-size: 22px; color: var(--muted); letter-spacing: .04em; }
+  .card .v { font-family: "Space Grotesk"; font-weight: 600; font-size: 46px; margin-top: 14px; line-height: 1.1; }
+  .card .v em { font-style: normal; color: #ff8a9a; }
+  .card::after { content: ""; position: absolute; left: 30px; right: 30px; top: 50%; height: 4px; border-radius: 4px; background: #ff5d73;
+    transform: scaleX(0); transform-origin: left; box-shadow: 0 0 20px #ff5d73; animation: strike .7s cubic-bezier(.2,.8,.2,1) both; animation-delay: calc(var(--strike) * var(--T) * 1s); }
+  @keyframes strike { to { transform: scaleX(1); } }
+  .fix { position: absolute; left: 160px; right: 160px; bottom: 120px; display: flex; align-items: center; gap: 28px; }
+  .fix img { width: 84px; filter: drop-shadow(0 0 30px rgba(109,92,255,.7)); }
+  .fix p { font-family: "Space Grotesk"; font-size: 64px; font-weight: 600; }
+  .fix p span { background: linear-gradient(90deg, #b6a8ff, #6d5cff); -webkit-background-clip: text; color: transparent; }
+</style></head>
+<body>
+  <div class="aurora"></div><div class="grain"></div>
+  <div class="wrap fadeall">
+    <div class="eyebrow in" style="--at:0">The problem</div>
+    <h1 class="in" style="--at:.03">Every auction on a public chain <span class="dim">leaks.</span></h1>
+    <div class="cards">
+      <div class="card in" style="--at:.1; --strike:.82"><div class="k">Bids are public</div><div class="v">so they get <em>sniped</em></div></div>
+      <div class="card in" style="--at:.2; --strike:.84"><div class="k">Bidders are public</div><div class="v">front run, <em>tracked forever</em></div></div>
+      <div class="card in" style="--at:.42; --strike:.86"><div class="k">Zcash has no smart contracts</div><div class="v">so you <em>trust a middleman</em></div></div>
+    </div>
+    <div class="fix in" style="--at:.8"><img src="logo.svg" alt=""><p><span>Tacit removes both problems.</span></p></div>
+  </div>
+<script>document.documentElement.style.setProperty("--T", Number(new URLSearchParams(location.search).get("d")) || 16);</script>
+</body></html>
