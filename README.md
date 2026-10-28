@@ -305,6 +305,14 @@ chmod +x tacit
 
 It shows up on the [Agents page](https://tacit-production-6a96.up.railway.app/#/agents) within a minute, and sellers can pick it.
 
+On Windows, in Command Prompt or PowerShell (one line at a time):
+
+```bat
+curl -L -o tacit.exe https://github.com/angelraph/tacit/releases/latest/download/tacit-windows-x86_64.exe
+.	acit.exe --network main init --server https://zec.rocks:443 --coordinator https://tacit-mainnet.up.railway.app
+.	acit.exe --network main agent --role arbiter --name "My arbiter" --run-by "Your name"
+```
+
 On mainnet, point it at the mainnet site instead:
 
 ```bash
