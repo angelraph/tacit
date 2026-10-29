@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/angelraph/tacit/actions/workflows/ci.yml/badge.svg)](https://github.com/angelraph/tacit/actions/workflows/ci.yml)
 
-**Live: [Mainnet](https://tacit-mainnet.up.railway.app) · [Testnet](https://tacit-production-6a96.up.railway.app)** · [Demo video](#demo) · [Mainnet proof](https://tacit-mainnet.up.railway.app/#/proof) · [Protocol](docs/PROTOCOL.md) · [Threat model](docs/THREAT_MODEL.md) · [Release v0.9.0](https://github.com/angelraph/tacit/releases/tag/v0.9.0)
+**[Try it in 3 minutes](https://tacit-production-6a96.up.railway.app/#/try) (free testnet coins)** · Live: [Mainnet](https://tacit-mainnet.up.railway.app) · [Testnet](https://tacit-production-6a96.up.railway.app) · [Demo video](#demo) · [Mainnet proof](#live-on-zcash-mainnet) · [Protocol](docs/PROTOCOL.md) · [Threat model](docs/THREAT_MODEL.md) · [Release v0.9.0](https://github.com/angelraph/tacit/releases/tag/v0.9.0)
 
 <a id="demo"></a>
 [![Watch the Tacit walk through](media/demo-thumbnail.png)](https://tacit-production-6a96.up.railway.app)
@@ -18,13 +18,13 @@ Built for the [Zecathon](https://thezecathon.com), Private Markets track.
 - **No custodian:** every auction and every escrow gets a fresh 2-of-3 FROST vault on the Ironwood shielded pool. The whole key never exists anywhere.
 - **Public audit:** the vault's viewing key is published, so any browser can check the payout to the zatoshi without learning who took part.
 - **Runs in your browser:** an Ironwood light wallet compiled to WebAssembly. Keys, syncing and zero-knowledge proofs never leave the tab.
-- **Live on mainnet:** our first auction with real ZEC settled on Zcash mainnet and passed the public audit.
+- **Live on mainnet:** two auctions with real ZEC settled on Zcash mainnet and passed the public audit, one with an independent arbiter, so no single party could have moved the funds.
 - **Code:** about 9,000 lines of Rust in 7 crates, a 6,000 line web app with no build step, 41 tests, three end-to-end harnesses, and an offline replay of real mainnet and testnet settlements.
 
 ## For judges: check it in three minutes
 
 1. **Use it.** Open [Try it](https://tacit-production-6a96.up.railway.app/#/try) on testnet. It walks you from a new wallet to free testnet coins, a sealed bid on the always-open practice lot, and an audit your own browser runs. Every step ticks itself off from what really happened.
-2. **See real money.** The [mainnet Proof page](https://tacit-mainnet.up.railway.app/#/proof) audits every mainnet auction from public data. Lot #2 settled honestly at 0.001 ZEC.
+2. **See real money.** Two mainnet auctions settled honestly, one of them with an [independent arbiter](#a-mainnet-auction-where-no-party-held-two-keys) so that no party, Tacit included, held two of the vault's three keys. The [mainnet Proof page](https://tacit-mainnet.up.railway.app/#/proof) audits them from public data.
 3. **Re-run mainnet offline.** `cargo test -p tacit-core --test conformance` replays that mainnet auction from [test-vectors/](test-vectors/): its terms, both sealed deposits as they sit on chain, and the drand beacon. The settlement rules must reproduce the exact payout the vault made on chain, with no network access.
 4. **Read the rules.** [docs/ZIP-DRAFT.md](docs/ZIP-DRAFT.md) specifies the format in the style of a Zcash Improvement Proposal, so any wallet or marketplace can implement it.
 
@@ -75,6 +75,22 @@ The first Tacit auction with real ZEC: two sealed bids, settled by the agents, a
 | Audit verdict | Settled honestly |
 
 The public mainnet site, [tacit-mainnet.up.railway.app](https://tacit-mainnet.up.railway.app), audits this auction again on its own [Proof page](https://tacit-mainnet.up.railway.app/#/proof), from the published terms and the chain alone, and runs its own operator and arbiter for new mainnet lots.
+
+### A mainnet auction where no party held two keys
+
+The second mainnet lot ran with an **independent arbiter**: a seat run by someone outside the team (donkinz) on their own Windows laptop, using the release binary. The vault's three key shares were held by the seller, the Tacit operator and donkinz, so no single party, Tacit included, could move the funds. The bid was sealed and paid from the Noir browser wallet. At the bell the operator proposed the payout, and donkinz's arbiter recomputed it from the rules and cosigned.
+
+| What | Value |
+|---|---|
+| Auction | `67c1cc4c48d2dcac17443a5b04e6c84e8eeea2c329a3f1e143da9bb1c76b82a6` |
+| Vault seats | seller · Tacit operator · donkinz arbiter (independent) |
+| Sealed bid (0.002 ZEC bond, from Noir) | `4e3ba0d20609f625693cc456479679d4818bc2ee164d3d5661df755c9bac2f25` |
+| Settlement (one shielded payout, cosigned by donkinz) | `2ba80b68d0596e9a2f4b17708df228b104ff70fb148a9f7b206529872a85250c` |
+| Settled at block | 3,534,498 |
+| Price | 0.001 ZEC (a lone bidder pays the reserve) |
+| Audit verdict | Settled honestly |
+
+Both mainnet settlements are frozen in [test-vectors/](test-vectors/) and replayed offline by CI.
 
 On testnet, every auction is audited live on the [Proof page](https://tacit-production-6a96.up.railway.app/#/proof). Recent settlements: `179c77a2…a78`, `6f09b98a…613`, `65810dcd…1ff`, `3e1b0e39…cdc`, all settled honestly.
 

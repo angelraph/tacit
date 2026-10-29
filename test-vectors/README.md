@@ -8,6 +8,7 @@ payments the settlement transaction actually made on chain.
 | File | Network | Bids | Price | Settlement |
 |---|---|---|---|---|
 | `mainnet-lot-2.json` | mainnet | 2 | 0.001 ZEC (second price) | `8d9f0e7040eda2052a8cde555e4c2595ae8decff9c17be47f080da7525bef49c` |
+| `mainnet-independent-arbiter.json` | mainnet | 1 | 0.001 ZEC (reserve; cosigned by an independent arbiter) | `2ba80b68d0596e9a2f4b17708df228b104ff70fb148a9f7b206529872a85250c` |
 | `testnet-lot-1.json` | testnet | 2 | 0.012 TAZ (second price) | `179c77a2…` |
 | `testnet-lone-bid.json` | testnet | 1 | 0.001 TAZ (a lone bidder pays the reserve) | `3e1b0e39…` |
 
