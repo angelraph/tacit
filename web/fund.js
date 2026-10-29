@@ -1,3 +1,5 @@
+import { safeGet, safeSet } from "./lib.js";
+
 // Funding a Tacit wallet from another chain through NEAR Intents 1Click.
 //
 // The quote names a fresh shielded address of this wallet as the recipient.
@@ -19,6 +21,30 @@ const ORIGINS = [
   ["nep141:sol.omft.near", "SOL", 9],
   ["nep141:btc.omft.near", "BTC", 8],
 ];
+
+// Well-formed stand-ins for a preview quote's refund address, one per chain.
+// 1Click rejects the zero address.
+function previewRefund(assetId) {
+  if (assetId.startsWith("nep141:sol")) return "So11111111111111111111111111111111111111112";
+  if (assetId.startsWith("nep141:btc")) return "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq";
+  return "0x1111111111111111111111111111111111111111";
+}
+
+// The refund address must belong to the chain the money comes from, or a
+// failed swap would refund into nowhere. Only the format can be checked here.
+function refundProblem(assetId, addr) {
+  if (assetId.startsWith("nep141:btc")) {
+    return /^(bc1[02-9ac-hj-np-z]{11,71}|[13][1-9A-HJ-NP-Za-km-z]{25,34})$/.test(addr) ? null : "That isn't a Bitcoin address (bc1…, 1… or 3…).";
+  }
+  if (assetId.startsWith("nep141:sol")) {
+    return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(addr) ? null : "That isn't a Solana address.";
+  }
+  if (!/^0x[0-9a-fA-F]{40}$/.test(addr)) return "That isn't an EVM address (0x followed by 40 hex characters).";
+  if (/^0x0{40}$/i.test(addr)) return "That's the zero address; refunds sent there are lost.";
+  return null;
+}
+
+const usd2 = (v) => `$${Number(v).toFixed(2)}`;
 
 function toUnits(s, decimals) {
   const m = String(s).trim().match(/^(\d*)(?:\.(\d*))?$/);
@@ -87,6 +113,10 @@ export async function renderFund(_, ctx) {
     if (!amount || amount === "0") throw new Error("Enter an amount");
     const refundTo = q("#refund").value.trim();
     if (!dry && !refundTo) throw new Error("Enter a refund address on the origin chain");
+    if (refundTo) {
+      const problem = refundProblem(assetId, refundTo);
+      if (problem) throw new Error(problem);
+    }
     const recipient = await call("address", { index: 2_000_000 + Math.floor(Math.random() * 1_000_000) });
     return {
       dry,
@@ -96,7 +126,9 @@ export async function renderFund(_, ctx) {
       depositType: "ORIGIN_CHAIN",
       destinationAsset: ZEC,
       amount,
-      refundTo: refundTo || "0x0000000000000000000000000000000000000000",
+      // A preview quote moves nothing, but 1Click still wants a well-formed
+      // address on the origin chain; the real quote always uses the user's.
+      refundTo: refundTo || previewRefund(assetId),
       refundType: "ORIGIN_CHAIN",
       recipient,
       recipientType: "DESTINATION_CHAIN",
@@ -111,12 +143,32 @@ export async function renderFund(_, ctx) {
     try {
       const r = await oneclick("/quote", await body(true));
       b.close();
-      q("#out").innerHTML = `<div class="notice" style="margin-top:14px">You'd receive about <b style="color:var(--text)">${esc(r.quote.amountOutFormatted)} ZEC</b> ($${esc(r.quote.amountOutUsd)}), in roughly ${Math.ceil(r.quote.timeEstimate / 60)} min after your deposit confirms.</div>`;
+      q("#out").innerHTML = `<div class="notice" style="margin-top:14px">You'd receive about <b style="color:var(--text)">${esc(r.quote.amountOutFormatted)} ZEC</b> (${usd2(r.quote.amountOutUsd)}), in roughly ${Math.ceil(r.quote.timeEstimate / 60)} min after your deposit confirms.</div>`;
       q("#go").disabled = false;
     } catch (e) {
       b.close();
       toast(e.message, "error");
     }
+  };
+
+  // A price is only good for the inputs it was quoted on.
+  for (const id of ["#origin", "#amt", "#refund"]) {
+    q(id).addEventListener("input", () => {
+      q("#go").disabled = true;
+      q("#out").innerHTML = "";
+    });
+  }
+
+  const showDeposit = (qd, origin) => {
+    q("#out").innerHTML = `
+        <div class="notice good" style="margin-top:14px">Send exactly <b>${esc(qd.amountInFormatted)} ${esc(origin)}</b> to this one-time address before ${new Date(qd.deadline).toLocaleString()}. You'll receive about <b>${esc(qd.amountOutFormatted)} ZEC</b>.</div>
+        <div class="notice warn" style="margin-top:10px">Send only <b>${esc(origin)}</b>, from that network, in one payment. Any other coin or network can't be swapped. If the swap can't complete, the money goes back to your refund address.</div>
+        <div class="addr" style="margin-top:10px">${esc(qd.depositAddress)}</div>
+        ${qd.depositMemo ? `<p class="muted" style="margin-top:8px">Memo (required): <span class="mono">${esc(qd.depositMemo)}</span></p>` : ""}
+        <div class="row" style="margin-top:10px"><button class="btn small" id="cp">Copy</button><span class="faint" id="status">Waiting for your deposit…</span></div>
+        <p class="faint" style="font-size:13px;margin-top:8px">This page remembers the swap, so you can reload it. The ZEC arrives in this wallet by itself.</p>`;
+    q("#cp").onclick = () => copy(qd.depositAddress);
+    poll(qd);
   };
 
   q("#go").onclick = async () => {
@@ -126,34 +178,44 @@ export async function renderFund(_, ctx) {
       const r = await oneclick("/quote", await body(false));
       b.close();
       const qd = r.quote;
-      q("#out").innerHTML = `
-        <div class="notice good" style="margin-top:14px">Send exactly <b>${esc(qd.amountInFormatted)}</b> to this one-time address before ${new Date(qd.deadline).toLocaleTimeString()}.</div>
-        <div class="addr" style="margin-top:10px">${esc(qd.depositAddress)}</div>
-        ${qd.depositMemo ? `<p class="muted" style="margin-top:8px">Memo: <span class="mono">${esc(qd.depositMemo)}</span></p>` : ""}
-        <div class="row" style="margin-top:10px"><button class="btn small" id="cp">Copy</button><span class="faint" id="status">Waiting for your deposit…</span></div>`;
-      q("#cp").onclick = () => copy(qd.depositAddress);
-      const poll = setInterval(async () => {
-        if (!document.body.contains(q("#status") || document.createElement("i"))) return clearInterval(poll);
-        try {
-          const st = await oneclick(`/status?depositAddress=${encodeURIComponent(qd.depositAddress)}`);
-          const el = q("#status");
-          if (!el) return clearInterval(poll);
-          el.textContent = {
-            PENDING_DEPOSIT: "Waiting for your deposit…",
-            KNOWN_DEPOSIT_TX: "Deposit seen, confirming…",
-            PROCESSING: "Swapping…",
-            SUCCESS: `Done. ZEC is on its way to your shielded address. Sync your wallet in a minute.`,
-            INCOMPLETE_DEPOSIT: "Deposit was short; you'll be refunded.",
-            REFUNDED: "Refunded.",
-            FAILED: "The swap failed; you'll be refunded.",
-          }[st.status] || st.status;
-          if (["SUCCESS", "REFUNDED", "FAILED"].includes(st.status)) clearInterval(poll);
-        } catch {}
-      }, 8000);
+      const origin = ORIGINS.find((o) => o[0] === q("#origin").value)[1];
+      safeSet("tacit.fund.last", JSON.stringify({ qd, origin }));
+      showDeposit(qd, origin);
     } catch (e) {
       b.close();
       toast(e.message, "error");
     }
   };
+
+  // Follows the swap until it finishes; once it has, the page forgets it.
+  function poll(qd) {
+    const check = async () => {
+      const el = q("#status");
+      if (!el || !document.body.contains(el)) return clearInterval(timer);
+      try {
+        const st = await oneclick(`/status?depositAddress=${encodeURIComponent(qd.depositAddress)}`);
+        el.textContent = {
+          PENDING_DEPOSIT: "Waiting for your deposit…",
+          KNOWN_DEPOSIT_TX: "Deposit seen, confirming…",
+          PROCESSING: "Swapping…",
+          SUCCESS: `Done. ZEC is on its way to your shielded address. Sync your wallet in a minute.`,
+          INCOMPLETE_DEPOSIT: "Deposit was short; you'll be refunded.",
+          REFUNDED: "Refunded to your refund address.",
+          FAILED: "The swap failed; you'll be refunded.",
+        }[st.status] || st.status;
+        if (["SUCCESS", "REFUNDED", "FAILED"].includes(st.status)) {
+          clearInterval(timer);
+          safeSet("tacit.fund.last", "");
+        }
+      } catch {}
+    };
+    const timer = setInterval(check, 8000);
+    check();
+  }
+
+  try {
+    const last = JSON.parse(safeGet("tacit.fund.last") || "null");
+    if (last && last.qd && new Date(last.qd.deadline).getTime() > Date.now() - 24 * 3600 * 1000) showDeposit(last.qd, last.origin);
+  } catch {}
   void unit;
 }
