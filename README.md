@@ -111,6 +111,17 @@ room ad3aaa9652f183473f903bd1a30db39d: cosigned the settlement of 67c1cc4c48d2dc
 
 Both mainnet settlements are frozen in [test-vectors/](test-vectors/) and replayed offline by CI.
 
+### Funded from another chain
+
+The Fund page swaps from USDC, USDT, ETH, SOL or BTC into shielded ZEC through NEAR Intents 1Click, delivered to a fresh address of the browser wallet. A real swap, end to end:
+
+| What | Value |
+|---|---|
+| Paid | 2.0 USDT on Solana, `57Hya9zxwTG8a8dZ1pitYij6taGWLGMGV4w5RYnyf18BfWyKxMTxVU8p1H6ZbGhpu7BigsHJjouWoCfPe2BXdP7T` |
+| Received | 0.00126778 ZEC, shielded, Zcash tx `705e2f8e7b1591e81db246d4c2a8a17bcdd337a11d4eaa58a3eda0b6746cfd07` |
+| Time | about 3 minutes |
+| Cost | about $0.41, almost all of it the bridge's flat fee for delivering ZEC (0.00032 ZEC, the same at any size). Tacit takes nothing; the page shows the cost before you pay. |
+
 On testnet, every auction is audited live on the [Proof page](https://tacit-production-6a96.up.railway.app/#/proof). Recent settlements: `179c77a2…a78`, `6f09b98a…613`, `65810dcd…1ff`, `3e1b0e39…cdc`, all settled honestly.
 
 ## Why Tacit
