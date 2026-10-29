@@ -1,4 +1,4 @@
-import { safeGet, safeSet } from "./lib.js";
+import { safeGet, safeSet, qrSvg } from "./lib.js";
 
 // Funding a Tacit wallet from another chain through NEAR Intents 1Click.
 //
@@ -55,6 +55,32 @@ function refundProblem(assetId, addr) {
 }
 
 const usd2 = (v) => `$${Number(v).toFixed(2)}`;
+
+// What the swap costs, said before anyone pays. Most of it on small amounts
+// is the bridge's fixed fee for sending ZEC out, the same at any size.
+function costLine(quote) {
+  const cost = Number(quote.amountInUsd) - Number(quote.amountOutUsd);
+  if (!(cost > 0)) return "";
+  const pct = (100 * cost) / Number(quote.amountInUsd);
+  const tip = pct > 5 ? ` Most of it is a fixed fee of about 0.0003 ZEC for delivering on Zcash, so larger amounts cost far less: about 2% at $20 and under 0.5% at $100.` : "";
+  return `<p class="faint" style="font-size:13px;margin:8px 0 0">Swap cost: about ${usd2(cost)} (${pct.toFixed(1)}%), paid to the network and solvers. Tacit takes nothing.${tip}</p>`;
+}
+
+// SPL mints for wallets that read Solana Pay links.
+const SPL = {
+  "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+  "nep141:sol-c800a4bd850783ccb82c2b2c7e84175443606352.omft.near": "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
+};
+
+// A payment link the scanning wallet understands, with the amount filled in
+// where there is a standard for it; otherwise just the address.
+function payUri(qd, asset) {
+  const amount = qd.amountInFormatted;
+  if (asset === "nep141:sol.omft.near") return `solana:${qd.depositAddress}?amount=${amount}`;
+  if (SPL[asset]) return `solana:${qd.depositAddress}?amount=${amount}&spl-token=${SPL[asset]}`;
+  if (asset === "nep141:btc.omft.near") return `bitcoin:${qd.depositAddress}?amount=${amount}`;
+  return qd.depositAddress;
+}
 
 function toUnits(s, decimals) {
   const m = String(s).trim().match(/^(\d*)(?:\.(\d*))?$/);
@@ -153,7 +179,7 @@ export async function renderFund(_, ctx) {
     try {
       const r = await oneclick("/quote", await body(true));
       b.close();
-      q("#out").innerHTML = `<div class="notice" style="margin-top:14px">You'd receive about <b style="color:var(--text)">${esc(r.quote.amountOutFormatted)} ZEC</b> (${usd2(r.quote.amountOutUsd)}), in roughly ${Math.ceil(r.quote.timeEstimate / 60)} min after your deposit confirms.</div>`;
+      q("#out").innerHTML = `<div class="notice" style="margin-top:14px">You'd receive about <b style="color:var(--text)">${esc(r.quote.amountOutFormatted)} ZEC</b> (${usd2(r.quote.amountOutUsd)}), in roughly ${Math.ceil(r.quote.timeEstimate / 60)} min after your deposit confirms.</div>${costLine(r.quote)}`;
       q("#go").disabled = false;
     } catch (e) {
       b.close();
@@ -179,15 +205,31 @@ export async function renderFund(_, ctx) {
     });
   }
 
-  const showDeposit = (qd, origin) => {
+  const showDeposit = (qd, origin, assetId = "") => {
     q("#out").innerHTML = `
         <div class="notice good" style="margin-top:14px">Send exactly <b>${esc(qd.amountInFormatted)} ${esc(origin)}</b> to this one-time address before ${new Date(qd.deadline).toLocaleString()}. You'll receive about <b>${esc(qd.amountOutFormatted)} ZEC</b>.</div>
         <div class="notice warn" style="margin-top:10px">Send only <b>${esc(origin)}</b>, from that network, in one payment. Any other coin or network can't be swapped. If the swap can't complete, the money goes back to your refund address.</div>
+        ${costLine(qd)}
+        <div class="qr" style="margin-top:12px">${qrSvg(payUri(qd, assetId))}</div>
+        <p class="faint" style="font-size:13px;margin:6px 0 0">Scan with your wallet app${payUri(qd, assetId) !== qd.depositAddress ? "; the amount fills in by itself" : ""}, or copy the address.</p>
         <div class="addr" style="margin-top:10px">${esc(qd.depositAddress)}</div>
         ${qd.depositMemo ? `<p class="muted" style="margin-top:8px">Memo (required): <span class="mono">${esc(qd.depositMemo)}</span></p>` : ""}
         <div class="row" style="margin-top:10px"><button class="btn small" id="cp">Copy</button><span class="faint" id="status">Waiting for your deposit…</span></div>
+        <details style="margin-top:12px"><summary class="faint" style="cursor:pointer">I've sent it</summary>
+          <div class="row" style="margin-top:8px"><input id="txh" placeholder="Paste your transaction id (optional, speeds things up)" style="flex:1;min-width:0" /><button class="btn small" id="sent">Tell the solvers</button></div>
+        </details>
         <p class="faint" style="font-size:13px;margin-top:8px">This page remembers the swap, so you can reload it. The ZEC arrives in this wallet by itself.</p>`;
     q("#cp").onclick = () => copy(qd.depositAddress);
+    q("#sent").onclick = async () => {
+      const txHash = q("#txh").value.trim();
+      if (!txHash) return toast("Paste the transaction id from your wallet", "error");
+      try {
+        await oneclick("/deposit/submit", { txHash, depositAddress: qd.depositAddress });
+        toast("Sent to the solvers. Your deposit is being picked up.");
+      } catch (e) {
+        toast(e.message, "error");
+      }
+    };
     poll(qd);
   };
 
@@ -199,8 +241,9 @@ export async function renderFund(_, ctx) {
       b.close();
       const qd = r.quote;
       const origin = ORIGINS.find((o) => o[0] === q("#origin").value)[1];
-      safeSet("tacit.fund.last", JSON.stringify({ qd, origin }));
-      showDeposit(qd, origin);
+      const assetId = q("#origin").value;
+      safeSet("tacit.fund.last", JSON.stringify({ qd, origin, assetId }));
+      showDeposit(qd, origin, assetId);
     } catch (e) {
       b.close();
       toast(e.message, "error");
@@ -235,7 +278,7 @@ export async function renderFund(_, ctx) {
 
   try {
     const last = JSON.parse(safeGet("tacit.fund.last") || "null");
-    if (last && last.qd && new Date(last.qd.deadline).getTime() > Date.now() - 24 * 3600 * 1000) showDeposit(last.qd, last.origin);
+    if (last && last.qd && new Date(last.qd.deadline).getTime() > Date.now() - 24 * 3600 * 1000) showDeposit(last.qd, last.origin, last.assetId);
   } catch {}
   void unit;
 }
