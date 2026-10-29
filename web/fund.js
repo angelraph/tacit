@@ -16,6 +16,12 @@ const ORIGINS = [
   ["nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near", "USDC on Base", 6],
   ["nep141:arb-0xaf88d065e77c8cc2239327c5edb3a432268e5831.omft.near", "USDC on Arbitrum", 6],
   ["nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near", "USDC on Solana", 6],
+  ["nep141:sol-c800a4bd850783ccb82c2b2c7e84175443606352.omft.near", "USDT on Solana", 6],
+  ["nep245:v2_1.omni.hot.tg:137_3hpYoaLtt8MP1Z2GH1U473DMRKgr", "USDT on Polygon", 6],
+  ["nep141:arb-0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9.omft.near", "USDT on Arbitrum", 6],
+  ["nep141:tron-d28a265909efecdcee7c5028585214ea0b96f015.omft.near", "USDT on Tron (TRC-20)", 6],
+  ["nep245:v2_1.omni.hot.tg:56_2CMMyVTGZkeyNZTSvS5sarzfir6g", "USDT on BNB Chain (BEP-20)", 18],
+  ["nep141:eth-0xdac17f958d2ee523a2206206994597c13d831ec7.omft.near", "USDT on Ethereum", 6],
   ["nep141:eth.omft.near", "ETH on Ethereum", 18],
   ["nep141:base.omft.near", "ETH on Base", 18],
   ["nep141:sol.omft.near", "SOL", 9],
@@ -27,6 +33,7 @@ const ORIGINS = [
 function previewRefund(assetId) {
   if (assetId.startsWith("nep141:sol")) return "So11111111111111111111111111111111111111112";
   if (assetId.startsWith("nep141:btc")) return "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq";
+  if (assetId.startsWith("nep141:tron")) return "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t";
   return "0x1111111111111111111111111111111111111111";
 }
 
@@ -35,6 +42,9 @@ function previewRefund(assetId) {
 function refundProblem(assetId, addr) {
   if (assetId.startsWith("nep141:btc")) {
     return /^(bc1[02-9ac-hj-np-z]{11,71}|[13][1-9A-HJ-NP-Za-km-z]{25,34})$/.test(addr) ? null : "That isn't a Bitcoin address (bc1…, 1… or 3…).";
+  }
+  if (assetId.startsWith("nep141:tron")) {
+    return /^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(addr) ? null : "That isn't a Tron address (T followed by 33 characters).";
   }
   if (assetId.startsWith("nep141:sol")) {
     return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(addr) ? null : "That isn't a Solana address.";
@@ -91,7 +101,7 @@ export async function renderFund(_, ctx) {
         <div class="stack">
           <label class="field"><span>Pay with</span><select id="origin">${ORIGINS.map(([id, name]) => `<option value="${id}">${esc(name)}</option>`).join("")}</select></label>
           <label class="field"><span>Amount to send</span><input id="amt" inputmode="decimal" placeholder="25" /></label>
-          <label class="field"><span>Refund address on that chain (if the swap can't complete)</span><input id="refund" placeholder="0x… / bc1… / So1…" /></label>
+          <label class="field"><span>Refund address on that chain (if the swap can't complete)</span><input id="refund" placeholder="0x… / T… / bc1… / Solana address" /></label>
           <div class="row"><button class="btn" id="quote">Get a quote</button><button class="btn primary" id="go" disabled>Get deposit address</button></div>
         </div>
         <div id="out"></div>
