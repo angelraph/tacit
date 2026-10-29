@@ -101,7 +101,7 @@ export async function renderFund(_, ctx) {
         <div class="stack">
           <label class="field"><span>Pay with</span><select id="origin">${ORIGINS.map(([id, name]) => `<option value="${id}">${esc(name)}</option>`).join("")}</select></label>
           <label class="field"><span>Amount to send</span><input id="amt" inputmode="decimal" placeholder="25" /></label>
-          <label class="field"><span>Refund address on that chain (if the swap can't complete)</span><input id="refund" placeholder="0x… / T… / bc1… / Solana address" /></label>
+          <label class="field"><span id="refund-label">Refund address on that chain (if the swap can't complete)</span><input id="refund" placeholder="0x… / T… / bc1… / Solana address" /></label>
           <div class="row"><button class="btn" id="quote">Get a quote</button><button class="btn primary" id="go" disabled>Get deposit address</button></div>
         </div>
         <div id="out"></div>
@@ -160,6 +160,16 @@ export async function renderFund(_, ctx) {
       toast(e.message, "error");
     }
   };
+
+  // Name the network the refund address must be on.
+  const chainOf = (id) =>
+    id.startsWith("nep141:btc") ? "Bitcoin" : id.startsWith("nep141:sol") ? "Solana" : id.startsWith("nep141:tron") ? "Tron" : id.includes(":56_") ? "BNB Chain" : id.includes(":137_") ? "Polygon" : id.startsWith("nep141:base") ? "Base" : id.startsWith("nep141:arb") ? "Arbitrum" : "Ethereum";
+  const labelRefund = () => {
+    const chain = chainOf(q("#origin").value);
+    q("#refund-label").textContent = `Your own ${chain} address, for a refund if the swap can't complete`;
+  };
+  q("#origin").addEventListener("change", labelRefund);
+  labelRefund();
 
   // A price is only good for the inputs it was quoted on.
   for (const id of ["#origin", "#amt", "#refund"]) {
