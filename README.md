@@ -90,6 +90,25 @@ The second mainnet lot ran with an **independent arbiter**: a seat run by someon
 | Price | 0.001 ZEC (a lone bidder pays the reserve) |
 | Audit verdict | Settled honestly |
 
+What the independent arbiter printed on its own laptop, from joining the vault to cosigning the payout:
+
+```text
+arbiter agent "donkinz arbiter" on main
+room 86a728b058a7b8361447b92f0e9363ae: dkg
+seat 3 of 3; waiting for the other seats...
+vault v86a728b058a7 ready: all three seats agree on it
+address  u17eqargzxg85qasqd3jhxq9juv3tthhcxpvkwkfxyt9mkwa49qmht0vr33q2sd2mxxm5d2geqg5uvtphyr8fkjqt4wfup06ngcvr57dj4
+room ad3aaa9652f183473f903bd1a30db39d: settle:67c1cc4c48d2dcac17443a5b04e6c84e8eeea2c329a3f1e143da9bb1c76b82a6:2
+the rules say this auction settles as:
+  deposit 252fac9b5c75  bid 0.0015 ZEC
+  clearing price 0.001 ZEC, network fee 0.00015 ZEC
+  pays        0.001 ZEC  to u1sru3w8rhzmnrqpfs3d55t9...
+  pays      0.00085 ZEC  to u10pzw7jr7lwjrz8y3l0yu45...
+waiting for seat 2 to send the settlement...
+the settlement pays exactly that.
+room ad3aaa9652f183473f903bd1a30db39d: cosigned the settlement of 67c1cc4c48d2dcac17443a5b04e6c84e8eeea2c329a3f1e143da9bb1c76b82a6
+```
+
 Both mainnet settlements are frozen in [test-vectors/](test-vectors/) and replayed offline by CI.
 
 On testnet, every auction is audited live on the [Proof page](https://tacit-production-6a96.up.railway.app/#/proof). Recent settlements: `179c77a2…a78`, `6f09b98a…613`, `65810dcd…1ff`, `3e1b0e39…cdc`, all settled honestly.
