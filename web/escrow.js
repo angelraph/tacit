@@ -3,6 +3,8 @@
 // the buyer. Either side can give the money to the other with the arbiter's
 // automatic cosignature; only a dispute needs the arbiter's own judgement.
 
+import { safeGet, safeSet } from "./lib.js";
+
 const enc = (o) => btoa(unescape(encodeURIComponent(JSON.stringify(o)))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 const dec = (s) => JSON.parse(decodeURIComponent(escape(atob(s.replace(/-/g, "+").replace(/_/g, "/")))));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -235,9 +237,18 @@ async function renderDeal(id, ctx) {
   const panel = view.querySelector("#state");
   const myRole = deal.role;
   const seatNo = myRole === "buyer" ? 1 : 2;
+  // A payout this browser broadcast, until a block shows the vault spent.
+  let sent = null;
+  try {
+    sent = JSON.parse(safeGet(`tacit.escrow.sent.${id}`) || "null");
+  } catch {}
+  if (sent && Date.now() - sent.at > 30 * 60 * 1000) sent = null;
   let html;
   if (st.spent) {
     html = `<span class="badge settled">Closed</span><h2 style="margin-top:10px">The vault has paid out</h2><p class="muted">Transaction</p><div class="addr">${esc(st.spent)}</div>`;
+  } else if (sent && funded) {
+    html = `<span class="badge open">Confirming</span><h2 style="margin-top:10px">Paid out to the ${esc(sent.payee)}, confirming</h2><p class="muted">The arbiter cosigned and the payout is broadcast. It counts once the next block is mined, about a minute or two; this page updates by itself.</p><p class="muted">Transaction</p><div class="addr">${esc(sent.txid)}</div>`;
+    ctx.every(30000, () => ctx.route());
   } else if (!funded) {
     html = `<span class="badge bidding">Waiting for payment</span>
       <h2 style="margin-top:10px">${zec(st.balance)} of ${zec(t.amount)} ${unit()} paid in</h2>
@@ -270,6 +281,7 @@ async function renderDeal(id, ctx) {
         b.onProgress,
       );
       b.close();
+      safeSet(`tacit.escrow.sent.${id}`, JSON.stringify({ txid: r.txid, payee, at: Date.now() }));
       toast(`Paid ${zec(r.amount)} ${unit()} to the ${payee}`, "good");
       ctx.route();
     } catch (e) {
