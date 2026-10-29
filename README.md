@@ -4,10 +4,12 @@
 
 [![CI](https://github.com/angelraph/tacit/actions/workflows/ci.yml/badge.svg)](https://github.com/angelraph/tacit/actions/workflows/ci.yml)
 
-**[Try it in 3 minutes](https://tacit-production-6a96.up.railway.app/#/try) (free testnet coins)** · Live: [Mainnet](https://tacit-mainnet.up.railway.app) · [Testnet](https://tacit-production-6a96.up.railway.app) · [Demo video](#demo) · [Mainnet proof](#live-on-zcash-mainnet) · [Protocol](docs/PROTOCOL.md) · [Threat model](docs/THREAT_MODEL.md) · [Release v0.9.0](https://github.com/angelraph/tacit/releases/tag/v0.9.0)
+**[Try it in 3 minutes](https://tacit-production-6a96.up.railway.app/#/try) (free testnet coins)** · Live: [Mainnet](https://tacit-mainnet.up.railway.app) · [Testnet](https://tacit-production-6a96.up.railway.app) · [Demo video](https://youtu.be/7nll9aKTCDI) · [Mainnet proof](#live-on-zcash-mainnet) · [Protocol](docs/PROTOCOL.md) · [Threat model](docs/THREAT_MODEL.md) · [Release v0.9.0](https://github.com/angelraph/tacit/releases/tag/v0.9.0)
 
 <a id="demo"></a>
-[![Watch the Tacit walk through](media/demo-thumbnail.png)](https://tacit-production-6a96.up.railway.app)
+[![Watch the 2-minute Tacit demo on YouTube](media/demo-thumbnail.png)](https://youtu.be/7nll9aKTCDI)
+
+**[Watch the 2-minute demo](https://youtu.be/7nll9aKTCDI)** (captions included; transcript in [docs/DEMO_TRANSCRIPT.md](docs/DEMO_TRANSCRIPT.md))
 
 Built for the [Zecathon](https://thezecathon.com), Private Markets track.
 
