@@ -20,7 +20,7 @@ Built for the [Zecathon](https://thezecathon.com), Private Markets track.
 - **No custodian:** every auction and every escrow gets a fresh 2-of-3 FROST vault on the Ironwood shielded pool. The whole key never exists anywhere.
 - **Public audit:** the vault's viewing key is published, so any browser can check the payout to the zatoshi without learning who took part.
 - **Runs in your browser:** an Ironwood light wallet compiled to WebAssembly. Keys, syncing and zero-knowledge proofs never leave the tab.
-- **Live on mainnet:** two auctions with real ZEC settled on Zcash mainnet and passed the public audit, one with an independent arbiter, so no single party could have moved the funds.
+- **Live on mainnet:** two auctions with real ZEC settled and passed the public audit (one with an independent arbiter, so no single party could have moved the funds), a shielded escrow paid out, and a real cross-chain swap funded a wallet.
 - **Code:** about 9,000 lines of Rust in 7 crates, a 6,000 line web app with no build step, 41 tests, three end-to-end harnesses, and an offline replay of real mainnet and testnet settlements.
 
 ## For judges: check it in three minutes
@@ -112,6 +112,18 @@ room ad3aaa9652f183473f903bd1a30db39d: cosigned the settlement of 67c1cc4c48d2dc
 ```
 
 Both mainnet settlements are frozen in [test-vectors/](test-vectors/) and replayed offline by CI.
+
+### A shielded escrow on mainnet
+
+A buyer and a seller, in two different browsers, opened a 2-of-3 escrow vault with the Tacit arbiter as the third seat. The buyer paid in, then released the money to the seller; the arbiter cosigned automatically, because only the buyer can give up the buyer's claim. On chain it is one ordinary Ironwood transaction: nothing shows it was an escrow.
+
+| What | Value |
+|---|---|
+| Escrow | `c676cabebb47ec7c7c7ea0f0bdedf45e4b49e0269e86d20a4d11b2b914d8f656` ("Tacit mainnet escrow demo") |
+| Vault seats | buyer · seller · Tacit arbiter |
+| Price | 0.0005 ZEC |
+| Payout to the seller (cosigned by the arbiter) | `15cb6b2d121d77b32178c37a77210fed5697f4d1afc66a591e76bc92da6b9492`, block 3,534,639 |
+| Seller received | 0.0004 ZEC (the price minus the 0.0001 ZEC network fee the vault pays) |
 
 ### Funded from another chain
 
